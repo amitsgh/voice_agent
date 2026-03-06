@@ -220,31 +220,6 @@ export const ConversationBar = React.forwardRef<
 			};
 		}, []);
 
-		// ─── Mid-session dynamic variable updates ────────────
-		const prevDynamicVariables = React.useRef(
-			JSON.stringify(dynamicVariables),
-		);
-
-		React.useEffect(() => {
-			const currentVars = JSON.stringify(dynamicVariables);
-			if (isConnected && currentVars !== prevDynamicVariables.current) {
-				console.log(
-					"[ConversationBar] Pushing updated dynamic variables mid-session",
-				);
-				conversation.sendContextualUpdate({
-					overrides: {
-						agent: {
-							dynamic_variables: dynamicVariables,
-						},
-					},
-				} as any);
-				prevDynamicVariables.current = currentVars;
-			}
-			if (!isConnected) {
-				prevDynamicVariables.current = currentVars;
-			}
-		}, [dynamicVariables, isConnected, conversation]);
-
 		return (
 			<div
 				ref={ref}
