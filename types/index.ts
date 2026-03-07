@@ -34,6 +34,7 @@ export interface DynamicVariables {
 	device_id: string;
 	cvalue: string;
 	content_type: string;
+	is_reconnect: boolean;
 }
 
 export interface ChatMessage {

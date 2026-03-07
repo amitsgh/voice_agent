@@ -20,50 +20,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 export interface ConversationBarProps {
-	/**
-	 * ElevenLabs Agent ID to connect to
-	 */
 	agentId: string;
-
-	/**
-	 * Custom className for the container
-	 */
+	userId: string;
 	className?: string;
-
-	/**
-	 * Custom className for the waveform
-	 */
 	waveformClassName?: string;
-
-	/**
-	 * Callback when conversation connects
-	 */
 	onConnect?: () => void;
-
-	/**
-	 * Callback when conversation disconnects
-	 */
 	onDisconnect?: () => void;
-
-	/**
-	 * Callback when an error occurs
-	 */
 	onError?: (error: Error) => void;
-
-	/**
-	 * Callback when a message is received
-	 */
 	onMessage?: (message: { source: "user" | "ai"; message: string }) => void;
-
-	/**
-	 * Callback when user sends a message
-	 */
 	onSendMessage?: (message: string) => void;
-
-	/**
-	 * Dynamic variables passed to the agent at session start.
-	 * Values must be string, number, or boolean (ElevenLabs SDK requirement).
-	 */
 	dynamicVariables?: Record<string, string | number | boolean>;
 }
 
@@ -74,6 +39,7 @@ export const ConversationBar = React.forwardRef<
 	(
 		{
 			agentId,
+			userId,
 			className,
 			waveformClassName,
 			onConnect,
@@ -140,6 +106,7 @@ export const ConversationBar = React.forwardRef<
 
 				await conversation.startSession({
 					agentId,
+					userId,
 					connectionType: "webrtc",
 					dynamicVariables,
 					onStatusChange: (status: {

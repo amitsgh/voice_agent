@@ -19,7 +19,6 @@ function timeNow() {
 	});
 }
 
-// ─── Fetch chat history ──────────────────────────────────────────────────────
 async function loadPreviousMessages(userId: string): Promise<ChatMessage[]> {
 	try {
 		const res = await fetch(`/api/conversations?user_id=${userId}`);
@@ -42,10 +41,20 @@ export default function ChatV2Page() {
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
+	const [historyLoaded, setHistoryLoaded] = useState(false);
 
 	useEffect(() => {
 		if (isInitialized && (!user || !accessToken)) router.replace("/login");
 	}, [isInitialized, user, accessToken, router]);
+
+	useEffect(() => {
+		if (user && isInitialized && !historyLoaded) {
+			loadPreviousMessages(user.id).then((history) => {
+				setMessages(history);
+				setHistoryLoaded(true);
+			});
+		}
+	}, [user, isInitialized, historyLoaded]);
 
 	useEffect(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -69,6 +78,7 @@ export default function ChatV2Page() {
 		device_id: DEVICE_ID,
 		cvalue: CVALUE,
 		content_type: CONTENT_TYPE_HEADER,
+		is_reconnect: messages.length > 0,
 	};
 
 	return (
@@ -175,11 +185,9 @@ export default function ChatV2Page() {
 			<div className="border-t border-white/10 bg-[#1C2D3B]">
 				<ConversationBar
 					agentId={DEFAULT_AGENT_ID}
+					userId={user.id}
 					dynamicVariables={dynamicVariables}
-					onConnect={async () => {
-						const history = await loadPreviousMessages(user.id);
-						setMessages(history);
-					}}
+					onConnect={() => {}}
 					onDisconnect={() => {}}
 					onMessage={(message) =>
 						setMessages((prev) => [

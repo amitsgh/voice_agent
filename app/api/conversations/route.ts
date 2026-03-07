@@ -11,9 +11,10 @@ export async function GET(request: Request) {
 
 		const result = await client.conversationalAi.conversations.list({
 			agentId: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID!,
+			callSuccessful: "success",
 			userId: userId ?? undefined,
-			pageSize: 1, // Only need the most recent conversation
-			summaryMode: "exclude",
+			pageSize: 1,
+			summaryMode: "include",
 		});
 
 		const latest = result.conversations[0];
@@ -21,7 +22,6 @@ export async function GET(request: Request) {
 			return Response.json({ messages: [] });
 		}
 
-		// Fetch full transcript of latest conversation
 		const detail = await client.conversationalAi.conversations.get(
 			latest.conversationId,
 		);
