@@ -1,5 +1,6 @@
 "use client";
 
+import type { AuthContextType, User } from "@/types";
 import { useRouter } from "next/navigation";
 import React, {
 	createContext,
@@ -9,31 +10,6 @@ import React, {
 	useState,
 } from "react";
 import { callAuthTokenRefresh, callAuthVerify } from "../lib/graphql";
-
-export interface User {
-	id: string;
-	firstName: string;
-	lastName: string;
-	phone: string;
-	email: string;
-	address: string;
-}
-
-interface AuthContextType {
-	user: User | null;
-	accessToken: string | null;
-	isInitialized: boolean;
-	requestOtp: (
-		phone: string,
-		countryCode: string,
-	) => Promise<{ success: boolean; error?: string }>;
-	verifyOtp: (
-		phone: string,
-		countryCode: string,
-		otp: string,
-	) => Promise<{ success: boolean; error?: string }>;
-	logout: () => void;
-}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -46,12 +22,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const router = useRouter();
 
-	// ── Restore session from localStorage ─────────────────────────────────────
 	useEffect(() => {
-		// Clean up legacy keys from the old auto-auth approach
-		localStorage.removeItem("user");
-		localStorage.removeItem("refresh_token");
-
 		const storedUser = localStorage.getItem("nuoro_user");
 		const storedToken = localStorage.getItem("auth_token");
 
@@ -63,7 +34,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		setIsInitialized(true);
 	}, []);
 
-	// ── Auto-refresh access token using refresh token ──────────────────────────
 	useEffect(() => {
 		if (!accessToken) return;
 
@@ -104,27 +74,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		return () => {
 			if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [accessToken]);
 
-	// ── OTP Request (simulated send) ───────────────────────────────────────────
 	const requestOtp = async (
 		_phone: string,
 		_countryCode: string,
 	): Promise<{ success: boolean; error?: string }> => {
-		// OTP dispatch is handled server-side. Just advance to next step.
 		return new Promise((resolve) =>
 			setTimeout(() => resolve({ success: true }), 600),
 		);
 	};
 
-	// ── OTP Verification via GraphQL ───────────────────────────────────────────
 	const verifyOtp = async (
 		phone: string,
 		countryCode: string,
 		otp: string,
 	): Promise<{ success: boolean; error?: string }> => {
-		// Prepend the 8899 test prefix if not already present
 		let normalizedPhone = phone.replace(/\D/g, "");
 		if (!normalizedPhone.startsWith("8899")) {
 			normalizedPhone = "8899" + normalizedPhone;
@@ -160,7 +125,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		}
 	};
 
-	// ── Logout ─────────────────────────────────────────────────────────────────
 	const logout = () => {
 		if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
 		setUser(null);

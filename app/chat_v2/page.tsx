@@ -6,28 +6,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { ConversationBar } from "@/components/ui/conversation-bar";
 import { cn } from "@/lib/utils";
+import type { ChatMessage, DynamicVariables } from "@/types";
 import { useAuth } from "../context/AuthContext";
 import { CONTENT_TYPE_HEADER, CVALUE, DEVICE_ID } from "../lib/graphql";
-
-// ─── Dynamic variables interface ──────────────────────────────────────────────
-interface DynamicVariables {
-	[key: string]: string | number | boolean;
-	user_id: string;
-	user_name: string;
-	first_name: string;
-	last_name: string;
-	user_phone: string;
-	access_token: string;
-	device_id: string;
-	cvalue: string;
-	content_type: string;
-}
-
-interface ChatMessage {
-	role: "user" | "assistant";
-	content: string;
-	time: string;
-}
 
 const DEFAULT_AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID!;
 
@@ -38,6 +19,23 @@ function timeNow() {
 	});
 }
 
+// ─── Fetch chat history ──────────────────────────────────────────────────────
+async function loadPreviousMessages(userId: string): Promise<ChatMessage[]> {
+	try {
+		const res = await fetch(`/api/conversations?user_id=${userId}`);
+		const data = await res.json();
+
+		return (data.messages ?? []).map((entry: any) => ({
+			role: entry.role === "user" ? "user" : "assistant",
+			content: entry.message || entry.text || "",
+			time: timeNow(),
+		}));
+	} catch (error) {
+		console.error("Failed to load previous messages:", error);
+		return [];
+	}
+}
+
 export default function ChatV2Page() {
 	const { user, accessToken, isInitialized, logout } = useAuth();
 	const router = useRouter();
@@ -45,12 +43,10 @@ export default function ChatV2Page() {
 
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 
-	// Auth guard
 	useEffect(() => {
 		if (isInitialized && (!user || !accessToken)) router.replace("/login");
 	}, [isInitialized, user, accessToken, router]);
 
-	// Auto-scroll
 	useEffect(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 	}, [messages]);
@@ -77,7 +73,6 @@ export default function ChatV2Page() {
 
 	return (
 		<div className="flex h-screen max-w-md mx-auto overflow-y-auto flex-col bg-[#1C2D3B]">
-			{/* ── Header ── */}
 			<div className="flex items-center gap-3 px-4 pt-10 pb-4 border-b border-white/10">
 				<button
 					onClick={() => router.back()}
@@ -96,7 +91,7 @@ export default function ChatV2Page() {
 						</span>
 						<span className="text-white/30 text-xs">•</span>
 						<span className="text-white/50 text-xs">
-							🔒 Clinician-reviewed
+							Clinician-reviewed
 						</span>
 					</div>
 				</div>
@@ -108,11 +103,9 @@ export default function ChatV2Page() {
 				</button>
 			</div>
 
-			{/* ── Messages ── */}
 			<div className="flex-1 overflow-y-auto no-scrollbar px-4 py-4 space-y-4">
 				{messages.length === 0 ? (
 					<div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
-						{/* AI avatar */}
 						<div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-[#C46843]/40 bg-[#C46843]/10">
 							<SparklesIcon className="h-6 w-6 text-[#C46843]" />
 						</div>
@@ -179,12 +172,14 @@ export default function ChatV2Page() {
 				<div ref={messagesEndRef} />
 			</div>
 
-			{/* ── ConversationBar ── */}
 			<div className="border-t border-white/10 bg-[#1C2D3B]">
 				<ConversationBar
 					agentId={DEFAULT_AGENT_ID}
 					dynamicVariables={dynamicVariables}
-					onConnect={() => setMessages([])}
+					onConnect={async () => {
+						const history = await loadPreviousMessages(user.id);
+						setMessages(history);
+					}}
 					onDisconnect={() => {}}
 					onMessage={(message) =>
 						setMessages((prev) => [

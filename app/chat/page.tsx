@@ -17,15 +17,7 @@ const TEST_OTP = "011223";
 
 const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID!;
 
-interface AuthState {
-	userId: string;
-	firstName: string;
-	lastName: string;
-	phone: string;
-	accessToken: string;
-	refreshToken: string;
-}
-
+import type { AuthState } from "@/types";
 export default function ChatPage() {
 	const [auth, setAuth] = useState<AuthState | null>(null);
 	const [loading, setLoading] = useState(true);

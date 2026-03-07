@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
-// ─── Country codes ───────────────────────────────────────────────────────────
 const COUNTRY_CODES = [
 	{ value: "+91", label: "IN +91" },
 	{ value: "+1", label: "US +1" },
@@ -28,12 +27,10 @@ export default function LoginPage() {
 	const resendRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-	// Already logged in → go to chat
 	useEffect(() => {
 		if (isInitialized && user) router.replace("/chat_v2");
 	}, [isInitialized, user, router]);
 
-	// ─── Resend timer ──────────────────────────────────────────────────────────
 	const startResendTimer = () => {
 		setResendSecs(30);
 		if (resendRef.current) clearInterval(resendRef.current);
@@ -48,7 +45,6 @@ export default function LoginPage() {
 		}, 1000);
 	};
 
-	// ─── Step 1: Request OTP ──────────────────────────────────────────────────
 	const handleSendOtp = async () => {
 		if (!phone.trim()) {
 			setError("Please enter your phone number.");
@@ -64,7 +60,6 @@ export default function LoginPage() {
 		} else setError(res.error ?? "Failed to send OTP.");
 	};
 
-	// ─── Step 2: Verify OTP ───────────────────────────────────────────────────
 	const handleVerify = async () => {
 		const code = otpDigits.join("");
 		if (code.length < 6) {
@@ -79,7 +74,6 @@ export default function LoginPage() {
 		else setError(res.error ?? "Verification failed.");
 	};
 
-	// ─── OTP input handlers ───────────────────────────────────────────────────
 	const handleOtpChange = (index: number, value: string) => {
 		const digit = value.replace(/\D/g, "").slice(-1);
 		const next = [...otpDigits];
@@ -108,23 +102,17 @@ export default function LoginPage() {
 		otpRefs.current[Math.min(pasted.length, 5)]?.focus();
 	};
 
-	// ─── Formatted phone display ──────────────────────────────────────────────
 	const formattedPhone = `${countryCode} ${phone}`;
 
-	// ─────────────────────────────────────────────────────────────────────────
-	// PHONE STEP
-	// ─────────────────────────────────────────────────────────────────────────
 	if (step === "phone")
 		return (
 			<div className="flex min-h-screen max-w-md mx-auto overflow-y-auto flex-col bg-[#1C2D3B] px-6">
-				{/* Logo */}
 				<div className="flex justify-center pt-12 pb-2">
 					<span className="text-white text-lg font-light tracking-[0.55em]">
 						NUORO
 					</span>
 				</div>
 
-				{/* Heading */}
 				<div className="mt-16">
 					<h1 className="text-white text-4xl font-bold leading-tight">
 						Welcome.
@@ -134,7 +122,6 @@ export default function LoginPage() {
 					</p>
 				</div>
 
-				{/* Phone input */}
 				<div className="mt-12">
 					<div className="flex items-end gap-3 border-b border-[#C46843] pb-2">
 						<select
@@ -175,7 +162,6 @@ export default function LoginPage() {
 					)}
 				</div>
 
-				{/* Continue button */}
 				<button
 					onClick={handleSendOtp}
 					disabled={loading}
@@ -184,7 +170,6 @@ export default function LoginPage() {
 					{loading ? "Sending…" : "Continue"}
 				</button>
 
-				{/* Divider */}
 				<div className="mt-8 flex items-center gap-3">
 					<div className="flex-1 h-px bg-white/15" />
 					<span className="text-white/40 text-xs font-medium tracking-widest">
@@ -193,12 +178,10 @@ export default function LoginPage() {
 					<div className="flex-1 h-px bg-white/15" />
 				</div>
 
-				{/* Email button */}
 				<button className="mt-4 w-full rounded-full border border-white/20 py-4 text-white font-semibold text-base hover:bg-white/5 transition">
 					Sign in with new email
 				</button>
 
-				{/* Footer */}
 				<div className="mt-auto pb-10 flex justify-center">
 					<button className="text-white/40 text-sm underline underline-offset-2">
 						Learn more about Nuoro
@@ -207,19 +190,14 @@ export default function LoginPage() {
 			</div>
 		);
 
-	// ─────────────────────────────────────────────────────────────────────────
-	// OTP STEP
-	// ─────────────────────────────────────────────────────────────────────────
 	return (
 		<div className="flex min-h-screen max-w-md mx-auto overflow-y-auto flex-col bg-[#1C2D3B] px-6">
-			{/* Logo */}
 			<div className="flex justify-center pt-12 pb-2">
 				<span className="text-white text-lg font-light tracking-[0.55em]">
 					NUORO
 				</span>
 			</div>
 
-			{/* Heading */}
 			<div className="mt-16">
 				<h1 className="text-white text-4xl font-bold leading-tight">
 					Verify your
@@ -231,7 +209,6 @@ export default function LoginPage() {
 				</p>
 			</div>
 
-			{/* Sent-to line */}
 			<div className="mt-6">
 				<p className="text-white/50 text-sm">
 					Sent to{" "}
@@ -251,7 +228,6 @@ export default function LoginPage() {
 				</button>
 			</div>
 
-			{/* OTP boxes */}
 			<div className="mt-8 flex items-center justify-between gap-2">
 				{otpDigits.map((digit, i) => (
 					<input
@@ -277,7 +253,6 @@ export default function LoginPage() {
 
 			{error && <p className="mt-4 text-red-400 text-sm">{error}</p>}
 
-			{/* Verify button */}
 			<button
 				onClick={handleVerify}
 				disabled={loading || otpDigits.join("").length < 6}
@@ -286,7 +261,6 @@ export default function LoginPage() {
 				{loading ? "Verifying…" : "Verify & Continue"}
 			</button>
 
-			{/* Resend */}
 			<div className="mt-4 flex justify-center">
 				{resendSecs > 0 ? (
 					<span className="text-white/40 text-sm flex items-center gap-2">
@@ -308,7 +282,6 @@ export default function LoginPage() {
 				)}
 			</div>
 
-			{/* Footer */}
 			<div className="mt-auto pb-10 flex justify-center">
 				<button className="text-white/40 text-sm underline underline-offset-2">
 					Need help? Visit our website
