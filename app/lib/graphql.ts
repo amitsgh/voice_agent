@@ -79,3 +79,120 @@ export async function callAuthTokenRefresh(refreshToken: string) {
 		refreshToken,
 	});
 }
+
+export const MY_APPOINTMENTS_QUERY = `
+  query MyAppointments($userId: String) {
+    myAppointments(input: { userId: $userId }) {
+      appointments {
+        id
+        userId
+        providerId
+        locationId
+        appointmentTypeId
+        startTime
+        endTime
+        createdAt
+        createdBy
+        createdById
+      }
+    }
+  }
+`;
+
+export interface Appointment {
+	id: string;
+	userId: string;
+	providerId: string;
+	locationId: string;
+	appointmentTypeId: string;
+	startTime: string;
+	endTime: string;
+	createdAt: string;
+	createdBy: string;
+	createdById: string;
+}
+
+export interface MyAppointmentsResponse {
+	myAppointments: {
+		appointments: Appointment[];
+	};
+}
+
+export const APPOINTMENT_TYPES_LIST_QUERY = `
+  query AppointmentTypesList {
+    appointmentTypesList {
+      id
+      name
+      description
+      durationInMinutes
+    }
+  }
+`;
+
+export interface AppointmentType {
+	id: string;
+	name: string;
+	description: string;
+	durationInMinutes: number;
+}
+
+export interface AppointmentTypesListResponse {
+	appointmentTypesList: AppointmentType[];
+}
+
+export const PROVIDERS_GET_QUERY = `
+  query ProvidersGet($appointmentTypeId: String) {
+    providersGet(input: { appointmentTypeId: $appointmentTypeId }) {
+      id
+      firstName
+      lastName
+    }
+  }
+`;
+
+export interface Provider {
+	id: string;
+	firstName: string;
+	lastName: string;
+}
+
+export interface ProvidersGetResponse {
+	providersGet: Provider[];
+}
+
+export const LOCATIONS_LIST_BY_TYPE_QUERY = `
+  query LocationsListWithProviderAvailabilitiesByAppointmentType($appointmentTypeId: String!, $providerId: String!) {
+    locationsListWithProviderAvailabilitiesByAppointmentType(
+      input: {
+        appointmentTypeId: $appointmentTypeId
+        providerId: $providerId
+      }
+    ) {
+      id
+      name
+      address
+      city
+      state
+      zip
+      phone
+      email
+      timezone
+    }
+  }
+`;
+
+export interface LocationDetail {
+	id: string;
+	name: string;
+	address: string;
+	city: string;
+	state: string;
+	zip: string;
+	phone: string;
+	email: string;
+	timezone: string;
+}
+
+export interface LocationsListByTypeResponse {
+	locationsListWithProviderAvailabilitiesByAppointmentType: LocationDetail[];
+}

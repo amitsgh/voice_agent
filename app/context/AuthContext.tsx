@@ -23,15 +23,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const router = useRouter();
 
 	useEffect(() => {
-		const storedUser = localStorage.getItem("nuoro_user");
-		const storedToken = localStorage.getItem("auth_token");
+		const initAuth = async () => {
+			const storedUser = localStorage.getItem("nuoro_user");
+			const storedToken = localStorage.getItem("auth_token");
+			const storedRefresh = localStorage.getItem("refresh_token");
 
-		if (storedUser && storedToken) {
-			setUser(JSON.parse(storedUser));
-			setAccessToken(storedToken);
-		}
+			if (!storedUser || !storedToken || !storedRefresh) {
+				localStorage.removeItem("nuoro_user");
+				localStorage.removeItem("auth_token");
+				localStorage.removeItem("refresh_token");
+				setIsInitialized(true);
+				return;
+			}
 
-		setIsInitialized(true);
+			let parsedUser: User;
+			try {
+				parsedUser = JSON.parse(storedUser);
+			} catch {
+				localStorage.removeItem("nuoro_user");
+				localStorage.removeItem("auth_token");
+				localStorage.removeItem("refresh_token");
+				setIsInitialized(true);
+				return;
+			}
+
+			try {
+				const res = await callAuthTokenRefresh(storedRefresh);
+				const payload = res.data?.AuthTokenRefresh;
+
+				if (!payload?.accessToken || !payload?.refreshToken) {
+					localStorage.removeItem("nuoro_user");
+					localStorage.removeItem("auth_token");
+					localStorage.removeItem("refresh_token");
+					setIsInitialized(true);
+					return;
+				}
+
+				setUser(parsedUser);
+				setAccessToken(payload.accessToken);
+				localStorage.setItem("auth_token", payload.accessToken);
+				localStorage.setItem("refresh_token", payload.refreshToken);
+			} catch (err) {
+				console.error("[AuthContext] Init token refresh failed:", err);
+				localStorage.removeItem("nuoro_user");
+				localStorage.removeItem("auth_token");
+				localStorage.removeItem("refresh_token");
+			} finally {
+				setIsInitialized(true);
+			}
+		};
+
+		void initAuth();
 	}, []);
 
 	useEffect(() => {
@@ -59,9 +101,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 						);
 					} else {
 						console.warn(
-							"[AuthContext] Token refresh failed — logging out.",
+							"[AuthContext] Token refresh failed, logging out.",
 						);
-						logout();
+						if (refreshTimerRef.current) {
+							clearInterval(refreshTimerRef.current);
+						}
+						setUser(null);
+						setAccessToken(null);
+						localStorage.removeItem("nuoro_user");
+						localStorage.removeItem("auth_token");
+						localStorage.removeItem("refresh_token");
+						router.push("/login");
 					}
 				} catch (err) {
 					console.error("[AuthContext] Token refresh error:", err);
@@ -74,12 +124,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		return () => {
 			if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
 		};
-	}, [accessToken]);
+	}, [accessToken, router]);
 
 	const requestOtp = async (
-		_phone: string,
-		_countryCode: string,
+		phone: string,
+		countryCode: string,
 	): Promise<{ success: boolean; error?: string }> => {
+		void phone;
+		void countryCode;
 		return new Promise((resolve) =>
 			setTimeout(() => resolve({ success: true }), 600),
 		);

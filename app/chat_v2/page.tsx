@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import type { ChatMessage, DynamicVariables } from "@/types";
 import { useAuth } from "../context/AuthContext";
 import { CONTENT_TYPE_HEADER, CVALUE, DEVICE_ID } from "../lib/graphql";
+import { MASTER_PROMPT } from "../prompts/master_prompt";
 
 const DEFAULT_AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID!;
 
@@ -21,7 +22,7 @@ function timeNow() {
 
 async function loadPreviousMessages(userId: string): Promise<ChatMessage[]> {
 	try {
-		const res = await fetch(`/api/conversations?user_id=${userId}`);
+		const res = await fetch(`/api/conversations?user_id=${userId}&k=3`);
 		const data = await res.json();
 
 		return (data.messages ?? []).map((entry: any) => ({
@@ -68,6 +69,22 @@ export default function ChatV2Page() {
 		);
 	}
 
+	const is_reconnect = messages.some((m) => m.role === "user");
+
+	const greeting_message = is_reconnect
+		? `Hi ${user.firstName}, welcome back! Let's pick up where we left off — how can I help you today?`
+		: `Hi ${user.firstName}, this is Hannah from Nuoro Wellness. How can I help you today? I can help you book, cancel, or reschedule an appointment.`;
+
+	let final_prompt = MASTER_PROMPT;
+	if (is_reconnect) {
+		const historyText = messages
+			.map((m) => `${m.role === "user" ? "User" : "Agent"}: ${m.content}`)
+			.join("\n\n");
+		final_prompt += `\n\n# Previous Conversation Context\nThe user is reconnecting. Here is the transcript of your previous interaction to help you pick up where you left off:\n\n${historyText}`;
+
+		console.log("final_prompt", final_prompt);
+	}
+
 	const dynamicVariables: DynamicVariables = {
 		user_id: user.id,
 		user_name: `${user.firstName} ${user.lastName}`.trim() || "Guest",
@@ -78,7 +95,7 @@ export default function ChatV2Page() {
 		device_id: DEVICE_ID,
 		cvalue: CVALUE,
 		content_type: CONTENT_TYPE_HEADER,
-		is_reconnect: messages.length > 0,
+		is_reconnect,
 	};
 
 	return (
@@ -187,6 +204,14 @@ export default function ChatV2Page() {
 					agentId={DEFAULT_AGENT_ID}
 					userId={user.id}
 					dynamicVariables={dynamicVariables}
+					overrides={{
+						agent: {
+							firstMessage: greeting_message,
+							prompt: {
+								prompt: final_prompt,
+							},
+						},
+					}}
 					onConnect={() => {}}
 					onDisconnect={() => {}}
 					onMessage={(message) =>

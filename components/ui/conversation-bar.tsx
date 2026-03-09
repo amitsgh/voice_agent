@@ -30,6 +30,7 @@ export interface ConversationBarProps {
 	onMessage?: (message: { source: "user" | "ai"; message: string }) => void;
 	onSendMessage?: (message: string) => void;
 	dynamicVariables?: Record<string, string | number | boolean>;
+	overrides?: object;
 }
 
 export const ConversationBar = React.forwardRef<
@@ -48,6 +49,7 @@ export const ConversationBar = React.forwardRef<
 			onMessage,
 			onSendMessage,
 			dynamicVariables,
+			overrides,
 		},
 		ref,
 	) => {
@@ -109,6 +111,7 @@ export const ConversationBar = React.forwardRef<
 					userId,
 					connectionType: "webrtc",
 					dynamicVariables,
+					overrides,
 					onStatusChange: (status: {
 						status:
 							| "connected"
@@ -117,12 +120,25 @@ export const ConversationBar = React.forwardRef<
 							| "disconnecting";
 					}) => setAgentState(status.status),
 				});
-			} catch (error) {
-				console.error("Error starting conversation:", error);
+			} catch (error: any) {
+				console.error("Detailed Start Error:", error);
+
+				const errorMessage =
+					error?.message ||
+					error?.reason ||
+					"Failed to start session";
+
 				setAgentState("disconnected");
-				onError?.(error as Error);
+				onError?.(new Error(errorMessage));
 			}
-		}, [conversation, getMicStream, agentId, dynamicVariables, onError]);
+		}, [
+			conversation,
+			getMicStream,
+			agentId,
+			dynamicVariables,
+			overrides,
+			onError,
+		]);
 
 		const handleEndSession = React.useCallback(() => {
 			conversation.endSession();
