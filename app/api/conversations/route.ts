@@ -67,12 +67,20 @@ export async function GET(request: Request) {
 		const allMessages = transcripts
 			.reverse()
 			.flat()
-			.filter(
-				(m: any) =>
-					m.role === "user" ||
-					m.role === "agent" ||
-					m.role === "assistant",
-			);
+			.filter((m: any) => {
+				const hasText = (m.message || m.text)?.trim();
+				return (
+					(m.role === "user" ||
+						m.role === "agent" ||
+						m.role === "assistant") &&
+					hasText &&
+					hasText !== "..."
+				);
+			})
+			.map((m: any) => ({
+				role: m.role,
+				message: m.message || m.text,
+			}));
 
 		const hasUserMessage = allMessages.some((m: any) => m.role === "user");
 
