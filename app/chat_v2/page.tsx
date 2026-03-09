@@ -81,8 +81,6 @@ export default function ChatV2Page() {
 			.map((m) => `${m.role === "user" ? "User" : "Agent"}: ${m.content}`)
 			.join("\n\n");
 		final_prompt += `\n\n# Previous Conversation Context\nThe user is reconnecting. Here is the transcript of your previous interaction to help you pick up where you left off:\n\n${historyText}`;
-
-		console.log("final_prompt", final_prompt);
 	}
 
 	const dynamicVariables: DynamicVariables = {
