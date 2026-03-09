@@ -38,7 +38,7 @@ export interface DynamicVariables {
 }
 
 export interface ChatMessage {
-	role: "user" | "assistant";
+	role: "user" | "assistant" | "separator";
 	content: string;
 	time: string;
 }

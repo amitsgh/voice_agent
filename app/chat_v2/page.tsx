@@ -29,7 +29,7 @@ async function loadHistory(
 		const data = await res.json();
 
 		const messages = (data.messages ?? []).map((entry: any) => ({
-			role: entry.role === "user" ? "user" : "assistant",
+			role: entry.role as "user" | "assistant" | "separator",
 			content: entry.message || entry.text || "",
 			time: timeNow(),
 		}));
@@ -156,56 +156,73 @@ export default function ChatV2Page() {
 						</p>
 					</div>
 				) : (
-					messages.map((msg, i) => (
-						<div
-							key={i}
-							className={cn(
-								"flex gap-3",
-								msg.role === "user" && "flex-row-reverse",
-							)}
-						>
-							{/* Avatar */}
-							{msg.role === "assistant" && (
-								<div className="flex-shrink-0 flex h-9 w-9 items-center justify-center rounded-full border border-[#C46843]/50 bg-[#C46843]/10">
-									<SparklesIcon className="h-4 w-4 text-[#C46843]" />
+					messages.map((msg, i) => {
+						if (msg.role === "separator") {
+							return (
+								<div
+									key={i}
+									className="flex items-center gap-4 py-2"
+								>
+									<div className="h-px flex-1 bg-white/10" />
+									<span className="text-[10px] font-bold uppercase tracking-widest text-white/30">
+										{msg.content}
+									</span>
+									<div className="h-px flex-1 bg-white/10" />
 								</div>
-							)}
+							);
+						}
 
+						return (
 							<div
+								key={i}
 								className={cn(
-									"flex flex-col gap-1 max-w-[78%]",
-									msg.role === "user" && "items-end",
+									"flex gap-3",
+									msg.role === "user" && "flex-row-reverse",
 								)}
 							>
-								{/* Label row */}
+								{/* Avatar */}
 								{msg.role === "assistant" && (
-									<div className="flex items-center gap-2">
-										<span className="text-white/70 text-xs font-medium">
-											Nuoro Care Assistant
-										</span>
-										<span className="rounded bg-[#C46843]/20 px-1.5 py-px text-[10px] font-semibold text-[#C46843] tracking-wider">
-											AI ASSISTANT
-										</span>
+									<div className="flex-shrink-0 flex h-9 w-9 items-center justify-center rounded-full border border-[#C46843]/50 bg-[#C46843]/10">
+										<SparklesIcon className="h-4 w-4 text-[#C46843]" />
 									</div>
 								)}
 
-								{/* Bubble */}
 								<div
 									className={cn(
-										"rounded-2xl px-4 py-3 text-sm leading-relaxed",
-										msg.role === "assistant"
-											? "bg-[#243546] text-white rounded-tl-sm"
-											: "bg-[#C46843] text-white rounded-tr-sm",
+										"flex flex-col gap-1 max-w-[78%]",
+										msg.role === "user" && "items-end",
 									)}
 								>
-									{msg.content}
+									{/* Label row */}
+									{msg.role === "assistant" && (
+										<div className="flex items-center gap-2">
+											<span className="text-white/70 text-xs font-medium">
+												Nuoro Care Assistant
+											</span>
+											<span className="rounded bg-[#C46843]/20 px-1.5 py-px text-[10px] font-semibold text-[#C46843] tracking-wider">
+												AI ASSISTANT
+											</span>
+										</div>
+									)}
+
+									{/* Bubble */}
+									<div
+										className={cn(
+											"rounded-2xl px-4 py-3 text-sm leading-relaxed",
+											msg.role === "assistant"
+												? "bg-[#243546] text-white rounded-tl-sm"
+												: "bg-[#C46843] text-white rounded-tr-sm",
+										)}
+									>
+										{msg.content}
+									</div>
+									<span className="text-white/30 text-xs">
+										{msg.time}
+									</span>
 								</div>
-								<span className="text-white/30 text-xs">
-									{msg.time}
-								</span>
 							</div>
-						</div>
-					))
+						);
+					})
 				)}
 				<div ref={messagesEndRef} />
 			</div>

@@ -64,23 +64,38 @@ export async function GET(request: Request) {
 			),
 		);
 
-		const allMessages = transcripts
-			.reverse()
-			.flat()
-			.filter((m: any) => {
-				const hasText = (m.message || m.text)?.trim();
-				return (
-					(m.role === "user" ||
-						m.role === "agent" ||
-						m.role === "assistant") &&
-					hasText &&
-					hasText !== "..."
-				);
-			})
-			.map((m: any) => ({
-				role: m.role,
-				message: m.message || m.text,
-			}));
+		// Process transcripts and insert separators between conversations
+		const allMessages: any[] = [];
+		const reversedTranscripts = transcripts.reverse();
+
+		reversedTranscripts.forEach((transcript, index) => {
+			const filtered = transcript
+				.filter((m: any) => {
+					const hasText = (m.message || m.text)?.trim();
+					return (
+						(m.role === "user" ||
+							m.role === "agent" ||
+							m.role === "assistant") &&
+						hasText &&
+						hasText !== "..."
+					);
+				})
+				.map((m: any) => ({
+					role: m.role,
+					message: m.message || m.text,
+				}));
+
+			if (filtered.length > 0) {
+				// If we already have messages, add a separator before the next conversation block
+				if (allMessages.length > 0) {
+					allMessages.push({
+						role: "separator",
+						message: "Previous Conversation",
+					});
+				}
+				allMessages.push(...filtered);
+			}
+		});
 
 		const hasUserMessage = allMessages.some((m: any) => m.role === "user");
 
