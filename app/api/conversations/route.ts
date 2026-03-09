@@ -81,7 +81,7 @@ export async function GET(request: Request) {
 					);
 				})
 				.map((m: any) => ({
-					role: m.role,
+					role: m.role === "agent" ? "assistant" : m.role,
 					message: m.message || m.text,
 				}));
 
