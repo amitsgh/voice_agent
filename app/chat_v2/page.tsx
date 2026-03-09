@@ -20,19 +20,28 @@ function timeNow() {
 	});
 }
 
-async function loadPreviousMessages(userId: string): Promise<ChatMessage[]> {
+async function loadHistory(
+	userId: string,
+): Promise<{ messages: ChatMessage[]; summaries: string[] }> {
 	try {
-		const res = await fetch(`/api/conversations?user_id=${userId}&k=3`);
+		// Fetch past 5 conversations
+		const res = await fetch(`/api/conversations?user_id=${userId}&k=5`);
 		const data = await res.json();
 
-		return (data.messages ?? []).map((entry: any) => ({
+		const messages = (data.messages ?? []).map((entry: any) => ({
 			role: entry.role === "user" ? "user" : "assistant",
 			content: entry.message || entry.text || "",
 			time: timeNow(),
 		}));
+
+		const summaries = (data.summaries ?? [])
+			.map((s: any) => s.summary)
+			.filter(Boolean);
+
+		return { messages, summaries };
 	} catch (error) {
-		console.error("Failed to load previous messages:", error);
-		return [];
+		console.error("Failed to load history:", error);
+		return { messages: [], summaries: [] };
 	}
 }
 
@@ -42,6 +51,7 @@ export default function ChatV2Page() {
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
+	const [summaries, setSummaries] = useState<string[]>([]);
 	const [historyLoaded, setHistoryLoaded] = useState(false);
 
 	useEffect(() => {
@@ -50,8 +60,9 @@ export default function ChatV2Page() {
 
 	useEffect(() => {
 		if (user && isInitialized && !historyLoaded) {
-			loadPreviousMessages(user.id).then((history) => {
-				setMessages(history);
+			loadHistory(user.id).then(({ messages, summaries }) => {
+				setMessages(messages);
+				setSummaries(summaries);
 				setHistoryLoaded(true);
 			});
 		}
@@ -69,18 +80,20 @@ export default function ChatV2Page() {
 		);
 	}
 
-	const is_reconnect = messages.some((m) => m.role === "user");
+	const is_reconnect =
+		messages.some((m) => m.role === "user") || summaries.length > 0;
 
 	const greeting_message = is_reconnect
 		? `Hi ${user.firstName}, welcome back! Let's pick up where we left off — how can I help you today?`
 		: `Hi ${user.firstName}, this is Hannah from Nuoro Wellness. How can I help you today? I can help you book, cancel, or reschedule an appointment.`;
 
 	let final_prompt = MASTER_PROMPT;
-	if (is_reconnect) {
-		const historyText = messages
-			.map((m) => `${m.role === "user" ? "User" : "Agent"}: ${m.content}`)
+
+	if (summaries.length > 0) {
+		const summaryText = summaries
+			.map((s, i) => `Session ${i + 1}: ${s}`)
 			.join("\n\n");
-		final_prompt += `\n\n# Previous Conversation Context\nThe user is reconnecting. Here is the transcript of your previous interaction to help you pick up where you left off:\n\n${historyText}`;
+		final_prompt += `\n\n# Past Conversation Summaries\nTo provide continuity, here are summaries of your past interactions with this user:\n\n${summaryText}`;
 	}
 
 	const dynamicVariables: DynamicVariables = {
@@ -209,22 +222,27 @@ export default function ChatV2Page() {
 								prompt: final_prompt,
 							},
 						},
+						widget: {
+							strip_audio_tags: true,
+						},
 					}}
 					onConnect={() => {}}
 					onDisconnect={() => {}}
-					onMessage={(message) =>
-						setMessages((prev) => [
-							...prev,
-							{
-								role:
-									message.source === "user"
-										? "user"
-										: "assistant",
-								content: message.message,
-								time: timeNow(),
-							},
-						])
-					}
+					onMessage={(message) => {
+						if (message.message && message.message.trim() !== "") {
+							setMessages((prev) => [
+								...prev,
+								{
+									role:
+										message.source === "user"
+											? "user"
+											: "assistant",
+									content: message.message,
+									time: timeNow(),
+								},
+							]);
+						}
+					}}
 					onSendMessage={(message) =>
 						setMessages((prev) => [
 							...prev,

@@ -8,49 +8,52 @@ export async function GET(request: Request) {
 	try {
 		const { searchParams } = new URL(request.url);
 		const userId = searchParams.get("user_id");
+		const mode = searchParams.get("mode") || "transcript";
 
-		// k controls how many past conversations to merge (default: 1, max: 10)
-		const k = Math.min(parseInt(searchParams.get("k") ?? "1", 10), 10);
+		const k = Math.min(parseInt(searchParams.get("k") ?? "3", 10), 10);
 
 		console.log(
-			`[conversations] Fetching k=${k} convs for userId=${userId}`,
+			`[conversations] Fetching mode=${mode}, k=${k} for userId=${userId}`,
 		);
 
 		const result = await client.conversationalAi.conversations.list({
 			agentId: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID!,
 			userId: userId ?? undefined,
 			pageSize: k,
+			summaryMode: "include",
+			callSuccessful: "success",
 		});
 
 		const conversations = result.conversations ?? [];
-		console.log(
-			`[conversations] Found ${conversations.length} conversations`,
-			conversations.map((c) => ({
-				id: c.conversationId,
-				status: c.status,
-				msgs: c.messageCount,
-			})),
-		);
 
 		if (conversations.length === 0) {
-			return Response.json({ messages: [] });
+			return Response.json({ messages: [], summaries: [] });
 		}
 
-		// Fetch transcripts for all k conversations in parallel
+		const summaries = conversations
+			.filter(
+				(c) =>
+					(c.status === "done" || c.status === "processing") &&
+					(c as any).transcriptSummary,
+			)
+			.map((c) => ({
+				conversation_id: c.conversationId,
+				summary: (c as any).transcriptSummary,
+				start_time: c.startTimeUnixSecs,
+			}));
+
+		if (mode === "summary") {
+			return Response.json({ summaries });
+		}
+
+		const transcriptK = Math.min(k, 3);
+		const conversationsToFetch = conversations.slice(0, transcriptK);
+
 		const transcripts = await Promise.all(
-			conversations.map((conv) =>
+			conversationsToFetch.map((conv) =>
 				client.conversationalAi.conversations
 					.get(conv.conversationId)
-					.then((detail) => {
-						console.log(
-							`[conversations] conv ${conv.conversationId}: ${detail.transcript?.length ?? 0} messages`,
-							detail.transcript?.map((m: any) => ({
-								role: m.role,
-								msg: m.message?.slice(0, 40),
-							})),
-						);
-						return detail.transcript ?? [];
-					})
+					.then((detail) => detail.transcript ?? [])
 					.catch((err) => {
 						console.error(
 							`[conversations] Failed to fetch conv ${conv.conversationId}:`,
@@ -61,8 +64,6 @@ export async function GET(request: Request) {
 			),
 		);
 
-		// Conversations come back newest-first — reverse so oldest is first
-		// then flatten into a single chronological message list
 		const allMessages = transcripts
 			.reverse()
 			.flat()
@@ -73,24 +74,15 @@ export async function GET(request: Request) {
 					m.role === "assistant",
 			);
 
-		console.log(
-			`[conversations] allMessages count: ${allMessages.length}, roles: `,
-			[...new Set(allMessages.map((m: any) => m.role))],
-		);
-
 		const hasUserMessage = allMessages.some((m: any) => m.role === "user");
-		console.log(`[conversations] hasUserMessage: ${hasUserMessage}`);
-
-		if (!hasUserMessage) {
-			return Response.json({ messages: [] });
-		}
 
 		return Response.json({
-			messages: allMessages,
+			messages: hasUserMessage ? allMessages : [],
+			summaries: summaries,
 			conversationCount: conversations.length,
 		});
 	} catch (error: any) {
 		console.error("[/api/conversations] Error:", error?.message ?? error);
-		return Response.json({ messages: [] });
+		return Response.json({ messages: [], summaries: [] });
 	}
 }
