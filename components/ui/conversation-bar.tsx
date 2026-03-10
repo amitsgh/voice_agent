@@ -106,7 +106,7 @@ export const ConversationBar = React.forwardRef<
 
 				await getMicStream();
 
-				await conversation.startSession({
+				const conversationId = await conversation.startSession({
 					agentId,
 					userId,
 					connectionType: "webrtc",
@@ -120,6 +120,8 @@ export const ConversationBar = React.forwardRef<
 							| "disconnecting";
 					}) => setAgentState(status.status),
 				});
+
+				console.log("Started conversation with ID:", conversationId);
 			} catch (error: any) {
 				console.error("Detailed Start Error:", error);
 
