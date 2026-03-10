@@ -242,6 +242,11 @@ export default function ChatV2Page() {
 						widget: {
 							strip_audio_tags: true,
 						},
+						conversation_config: {
+							monitoring: {
+								enabled: true,
+							},
+						},
 					}}
 					onConnect={() => {}}
 					onDisconnect={() => {}}
