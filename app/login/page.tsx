@@ -28,7 +28,7 @@ export default function LoginPage() {
 	const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
 	useEffect(() => {
-		if (isInitialized && user) router.replace("/chat_v2");
+		if (isInitialized && user) router.replace("/home");
 	}, [isInitialized, user, router]);
 
 	const startResendTimer = () => {
@@ -70,7 +70,7 @@ export default function LoginPage() {
 		setLoading(true);
 		const res = await verifyOtp(phone, countryCode, code);
 		setLoading(false);
-		if (res.success) router.push("/chat_v2");
+		if (res.success) router.push("/home");
 		else setError(res.error ?? "Verification failed.");
 	};
 

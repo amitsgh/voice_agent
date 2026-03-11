@@ -24,7 +24,6 @@ async function loadHistory(
 	userId: string,
 ): Promise<{ messages: ChatMessage[]; summaries: string[] }> {
 	try {
-		// Fetch past 5 conversations
 		const res = await fetch(`/api/conversations?user_id=${userId}&k=5`);
 		const data = await res.json();
 
@@ -110,10 +109,11 @@ export default function ChatV2Page() {
 	};
 
 	return (
+		<div className="min-h-screen bg-[#1C2D3B]">
 		<div className="flex h-screen max-w-md mx-auto overflow-y-auto flex-col bg-[#1C2D3B]">
 			<div className="flex items-center gap-3 px-4 pt-10 pb-4 border-b border-white/10">
 				<button
-					onClick={() => router.back()}
+					onClick={() => router.push("/home")}
 					className="flex h-8 w-8 items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/10 transition"
 				>
 					<ArrowLeftIcon className="h-5 w-5" />
@@ -142,7 +142,52 @@ export default function ChatV2Page() {
 			</div>
 
 			<div className="flex-1 overflow-y-auto no-scrollbar px-4 py-4 space-y-4">
-				{messages.length === 0 ? (
+				{!historyLoaded ? (
+					/* ── Skeleton loader ─────────────────────────────────── */
+					<div className="flex flex-col gap-5 animate-pulse pt-2">
+						{/* Row 1 — assistant */}
+						<div className="flex gap-3">
+							<div className="flex-shrink-0 h-9 w-9 rounded-full bg-white/10" />
+							<div className="flex flex-col gap-2 max-w-[78%]">
+								<div className="h-3 w-28 rounded bg-white/10" />
+								<div className="h-14 w-56 rounded-2xl rounded-tl-sm bg-white/10" />
+								<div className="h-2.5 w-10 rounded bg-white/5" />
+							</div>
+						</div>
+						{/* Row 2 — user */}
+						<div className="flex gap-3 flex-row-reverse">
+							<div className="flex flex-col gap-2 items-end max-w-[78%]">
+								<div className="h-10 w-44 rounded-2xl rounded-tr-sm bg-white/10" />
+								<div className="h-2.5 w-10 rounded bg-white/5" />
+							</div>
+						</div>
+						{/* Row 3 — assistant (longer) */}
+						<div className="flex gap-3">
+							<div className="flex-shrink-0 h-9 w-9 rounded-full bg-white/10" />
+							<div className="flex flex-col gap-2 max-w-[78%]">
+								<div className="h-3 w-28 rounded bg-white/10" />
+								<div className="h-20 w-64 rounded-2xl rounded-tl-sm bg-white/10" />
+								<div className="h-2.5 w-10 rounded bg-white/5" />
+							</div>
+						</div>
+						{/* Row 4 — user */}
+						<div className="flex gap-3 flex-row-reverse">
+							<div className="flex flex-col gap-2 items-end max-w-[78%]">
+								<div className="h-10 w-36 rounded-2xl rounded-tr-sm bg-white/10" />
+								<div className="h-2.5 w-10 rounded bg-white/5" />
+							</div>
+						</div>
+						{/* Row 5 — assistant */}
+						<div className="flex gap-3">
+							<div className="flex-shrink-0 h-9 w-9 rounded-full bg-white/10" />
+							<div className="flex flex-col gap-2 max-w-[78%]">
+								<div className="h-3 w-28 rounded bg-white/10" />
+								<div className="h-12 w-52 rounded-2xl rounded-tl-sm bg-white/10" />
+								<div className="h-2.5 w-10 rounded bg-white/5" />
+							</div>
+						</div>
+					</div>
+				) : messages.length === 0 ? (
 					<div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
 						<div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-[#C46843]/40 bg-[#C46843]/10">
 							<SparklesIcon className="h-6 w-6 text-[#C46843]" />
@@ -276,6 +321,7 @@ export default function ChatV2Page() {
 					}
 				/>
 			</div>
+		</div>
 		</div>
 	);
 }

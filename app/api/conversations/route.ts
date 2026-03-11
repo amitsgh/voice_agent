@@ -4,17 +4,13 @@ const client = new ElevenLabsClient({
 	apiKey: process.env.ELEVENLABS_API_KEY!,
 });
 
+console.log("ELEVENLABS_API_KEY", process.env.ELEVENLABS_API_KEY!);
+
 export async function GET(request: Request) {
 	try {
 		const { searchParams } = new URL(request.url);
 		const userId = searchParams.get("user_id");
-		const mode = searchParams.get("mode") || "transcript";
-
-		const k = Math.min(parseInt(searchParams.get("k") ?? "3", 10), 10);
-
-		console.log(
-			`[conversations] Fetching mode=${mode}, k=${k} for userId=${userId}`,
-		);
+		const k = parseInt(searchParams.get("k") ?? "3", 10);
 
 		const result = await client.conversationalAi.conversations.list({
 			agentId: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID!,
@@ -42,12 +38,7 @@ export async function GET(request: Request) {
 				start_time: c.startTimeUnixSecs,
 			}));
 
-		if (mode === "summary") {
-			return Response.json({ summaries });
-		}
-
-		const transcriptK = Math.min(k, 3);
-		const conversationsToFetch = conversations.slice(0, transcriptK);
+		const conversationsToFetch = conversations.slice(0, k);
 
 		const transcripts = await Promise.all(
 			conversationsToFetch.map((conv) =>
@@ -64,7 +55,6 @@ export async function GET(request: Request) {
 			),
 		);
 
-		// Process transcripts and insert separators between conversations
 		const allMessages: any[] = [];
 		const reversedTranscripts = transcripts.reverse();
 
@@ -85,8 +75,8 @@ export async function GET(request: Request) {
 					message: m.message || m.text,
 				}));
 
-			if (filtered.length > 0) {
-				// If we already have messages, add a separator before the next conversation block
+			const hasUserTurn = filtered.some((m) => m.role === "user");
+			if (filtered.length > 0 && hasUserTurn) {
 				if (allMessages.length > 0) {
 					allMessages.push({
 						role: "separator",
@@ -97,10 +87,8 @@ export async function GET(request: Request) {
 			}
 		});
 
-		const hasUserMessage = allMessages.some((m: any) => m.role === "user");
-
 		return Response.json({
-			messages: hasUserMessage ? allMessages : [],
+			messages: allMessages,
 			summaries: summaries,
 			conversationCount: conversations.length,
 		});
