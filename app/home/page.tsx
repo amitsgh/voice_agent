@@ -120,10 +120,9 @@ export default function HomePage() {
 						href="/admin"
 						icon={<AdminIcon />}
 						title="Admin"
-						subtitle="Manage settings, view reports and configure the platform."
+						subtitle="Monitor conversations, view reports and take over when needed."
 						accentColor="#4A7FA5"
-						badge="Coming soon"
-						disabled
+						badge="Admin Panel"
 					/>
 				</div>
 			</main>

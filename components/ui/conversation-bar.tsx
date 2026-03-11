@@ -24,13 +24,15 @@ export interface ConversationBarProps {
 	userId: string;
 	className?: string;
 	waveformClassName?: string;
-	onConnect?: () => void;
+	isTakeover?: boolean;
+	onConnect?: (conversationId?: string) => void;
 	onDisconnect?: () => void;
 	onError?: (error: Error) => void;
 	onMessage?: (message: { source: "user" | "ai"; message: string }) => void;
 	onSendMessage?: (message: string) => void;
 	dynamicVariables?: Record<string, string | number | boolean>;
 	overrides?: object;
+	onHandover?: (reason: string) => void;
 }
 
 export const ConversationBar = React.forwardRef<
@@ -43,6 +45,7 @@ export const ConversationBar = React.forwardRef<
 			userId,
 			className,
 			waveformClassName,
+			isTakeover = false,
 			onConnect,
 			onDisconnect,
 			onError,
@@ -50,6 +53,7 @@ export const ConversationBar = React.forwardRef<
 			onSendMessage,
 			dynamicVariables,
 			overrides,
+			onHandover,
 		},
 		ref,
 	) => {
@@ -63,6 +67,7 @@ export const ConversationBar = React.forwardRef<
 
 		const conversation = useConversation({
 			onConnect: () => {
+				// conversationId is passed in startConversation below
 				onConnect?.();
 			},
 			onDisconnect: () => {
@@ -86,6 +91,24 @@ export const ConversationBar = React.forwardRef<
 									: JSON.stringify(error),
 							);
 				onError?.(errorObj);
+			},
+			clientTools: {
+				handover_to_human_agent: async (parameters: {
+					reason: string;
+				}) => {
+					console.log(
+						"AI requested handover! Reason:",
+						parameters.reason,
+					);
+					if (onHandover) {
+						onHandover(
+							parameters.reason ||
+								"Patient requested human agent",
+						);
+					}
+					// Return a success string so the LLM knows the tool fired successfully
+					return "handover_initiated";
+				},
 			},
 		});
 
@@ -118,9 +141,14 @@ export const ConversationBar = React.forwardRef<
 							| "connecting"
 							| "disconnected"
 							| "disconnecting";
-					}) => setAgentState(status.status),
+					}) => {
+						setAgentState(status.status);
+					},
 				});
 
+				// startSession resolves once the session is fully established and
+				// returns the conversation ID — safe to use it here.
+				onConnect?.(conversationId);
 				console.log("Started conversation with ID:", conversationId);
 			} catch (error: any) {
 				console.error("Detailed Start Error:", error);
@@ -140,6 +168,7 @@ export const ConversationBar = React.forwardRef<
 			dynamicVariables,
 			overrides,
 			onError,
+			onConnect,
 		]);
 
 		const handleEndSession = React.useCallback(() => {
@@ -151,6 +180,20 @@ export const ConversationBar = React.forwardRef<
 				mediaStreamRef.current = null;
 			}
 		}, [conversation]);
+
+		React.useEffect(() => {
+			if (isTakeover && agentState === "connected") {
+				handleEndSession();
+			}
+		}, [isTakeover, agentState, handleEndSession]);
+
+		const prevTakeoverRef = React.useRef(isTakeover);
+		React.useEffect(() => {
+			if (prevTakeoverRef.current === true && !isTakeover && agentState === "disconnected") {
+				startConversation();
+			}
+			prevTakeoverRef.current = isTakeover;
+		}, [isTakeover, agentState, startConversation]);
 
 		const toggleMute = React.useCallback(() => {
 			setIsMuted((prev) => !prev);
@@ -168,12 +211,14 @@ export const ConversationBar = React.forwardRef<
 			if (!textInput.trim()) return;
 
 			const messageToSend = textInput;
-			conversation.sendUserMessage(messageToSend);
+			if (!isTakeover) {
+				conversation.sendUserMessage(messageToSend);
+			}
 			setTextInput("");
 			onSendMessage?.(messageToSend);
-		}, [conversation, textInput, onSendMessage]);
+		}, [conversation, textInput, onSendMessage, isTakeover]);
 
-		const isConnected = agentState === "connected";
+		const isConnected = agentState === "connected" || isTakeover;
 
 		const handleTextChange = React.useCallback(
 			(e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -283,7 +328,7 @@ export const ConversationBar = React.forwardRef<
 										className={cn(
 											isMuted ? "bg-foreground/5" : "",
 										)}
-										disabled={!isConnected}
+										disabled={!isConnected || isTakeover}
 									>
 										{isMuted ? <MicOff /> : <Mic />}
 									</Button>
@@ -323,7 +368,7 @@ export const ConversationBar = React.forwardRef<
 										size="icon"
 										onClick={handleStartOrEnd}
 										disabled={
-											agentState === "disconnecting"
+											agentState === "disconnecting" || isTakeover
 										}
 									>
 										{isConnected ||

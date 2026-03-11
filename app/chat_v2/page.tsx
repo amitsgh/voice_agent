@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftIcon, SparklesIcon } from "lucide-react";
+import { ArrowLeftIcon, SparklesIcon, UserIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -52,6 +52,14 @@ export default function ChatV2Page() {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [summaries, setSummaries] = useState<string[]>([]);
 	const [historyLoaded, setHistoryLoaded] = useState(false);
+	// Takeover state
+	const [conversationId, setConversationId] = useState<string | null>(null);
+	const conversationIdRef = useRef<string | null>(null);
+	const [isTakeover, setIsTakeover] = useState(false);
+	const isTakeoverRef = useRef(false);
+	const [isResolved, setIsResolved] = useState(false);
+	const lastAdminMsgTimestamp = useRef<string | null>(null);
+	const seenAdminMsgIds = useRef<Set<string>>(new Set());
 
 	useEffect(() => {
 		if (isInitialized && (!user || !accessToken)) router.replace("/login");
@@ -70,6 +78,62 @@ export default function ChatV2Page() {
 	useEffect(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 	}, [messages]);
+
+	// Poll takeover state every 3s when we have an active conversation
+	useEffect(() => {
+		if (!conversationId) return;
+		const poll = async () => {
+			try {
+				const res = await fetch(`/api/admin/takeover?conversation_id=${conversationId}`);
+				const data = await res.json();
+				if (data.resolved) {
+					setIsResolved(true);
+					setIsTakeover(false);
+					isTakeoverRef.current = false;
+				} else {
+					setIsTakeover(Boolean(data.is_active));
+					isTakeoverRef.current = Boolean(data.is_active);
+				}
+			} catch { /* ignore */ }
+		};
+		poll();
+		const interval = setInterval(poll, 3000);
+		return () => clearInterval(interval);
+	}, [conversationId]);
+
+	// Poll admin messages every 3s during takeover
+	useEffect(() => {
+		if (!conversationId || !isTakeover) return;
+		const poll = async () => {
+			try {
+				const since = lastAdminMsgTimestamp.current
+					? `&since=${encodeURIComponent(lastAdminMsgTimestamp.current)}`
+					: "";
+				const res = await fetch(`/api/admin/message?conversation_id=${conversationId}${since}`);
+				const data = await res.json();
+				const msgs = data.messages ?? [];
+				const newMsgs = msgs.filter((m: any) => !seenAdminMsgIds.current.has(m.id) && m.sender !== "patient");
+
+				if (newMsgs.length > 0) {
+					newMsgs.forEach((m: any) => seenAdminMsgIds.current.add(m.id));
+					lastAdminMsgTimestamp.current = newMsgs[newMsgs.length - 1].sent_at;
+					setMessages((prev) => [
+						...prev,
+						...newMsgs.map((m: any) => ({
+							role: "assistant" as const,
+							content: m.text,
+							time: new Date(m.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+							isHuman: true,
+							sender: m.sender ?? "John",
+						})),
+					]);
+				}
+			} catch { /* ignore */ }
+		};
+		poll();
+		const interval = setInterval(poll, 3000);
+		return () => clearInterval(interval);
+	}, [conversationId, isTakeover]);
 
 	if (!isInitialized || !user || !accessToken) {
 		return (
@@ -227,8 +291,15 @@ export default function ChatV2Page() {
 							>
 								{/* Avatar */}
 								{msg.role === "assistant" && (
-									<div className="flex-shrink-0 flex h-9 w-9 items-center justify-center rounded-full border border-[#C46843]/50 bg-[#C46843]/10">
-										<SparklesIcon className="h-4 w-4 text-[#C46843]" />
+									<div className={cn(
+										"flex-shrink-0 flex h-9 w-9 items-center justify-center rounded-full border",
+										(msg as any).isHuman
+											? "border-[#4A7FA5]/50 bg-[#4A7FA5]/10"
+											: "border-[#C46843]/50 bg-[#C46843]/10"
+									)}>
+										{(msg as any).isHuman
+											? <UserIcon className="h-4 w-4 text-[#4A7FA5]" />
+											: <SparklesIcon className="h-4 w-4 text-[#C46843]" />}
 									</div>
 								)}
 
@@ -242,10 +313,15 @@ export default function ChatV2Page() {
 									{msg.role === "assistant" && (
 										<div className="flex items-center gap-2">
 											<span className="text-white/70 text-xs font-medium">
-												Nuoro Care Assistant
+												{(msg as any).isHuman ? ((msg as any).sender ?? "John") : "Nuoro Care Assistant"}
 											</span>
-											<span className="rounded bg-[#C46843]/20 px-1.5 py-px text-[10px] font-semibold text-[#C46843] tracking-wider">
-												AI ASSISTANT
+											<span className={cn(
+												"rounded px-1.5 py-px text-[10px] font-semibold tracking-wider",
+												(msg as any).isHuman
+													? "bg-[#4A7FA5]/20 text-[#4A7FA5]"
+													: "bg-[#C46843]/20 text-[#C46843]"
+											)}>
+												{(msg as any).isHuman ? "CARE TEAM" : "AI ASSISTANT"}
 											</span>
 										</div>
 									)}
@@ -255,7 +331,9 @@ export default function ChatV2Page() {
 										className={cn(
 											"rounded-2xl px-4 py-3 text-sm leading-relaxed",
 											msg.role === "assistant"
-												? "bg-[#243546] text-white rounded-tl-sm"
+												? (msg as any).isHuman
+													? "bg-[#1E3448] border border-[#4A7FA5]/30 text-white rounded-tl-sm"
+													: "bg-[#243546] text-white rounded-tl-sm"
 												: "bg-[#C46843] text-white rounded-tr-sm",
 										)}
 									>
@@ -273,53 +351,101 @@ export default function ChatV2Page() {
 			</div>
 
 			<div className="border-t border-white/10 bg-[#1C2D3B]">
-				<ConversationBar
-					agentId={DEFAULT_AGENT_ID}
-					userId={user.id}
-					dynamicVariables={dynamicVariables}
-					overrides={{
-						agent: {
-							firstMessage: greeting_message,
-							prompt: {
-								prompt: final_prompt,
+				{isResolved ? (
+					<div className="flex h-[150px] items-center justify-center">
+						<div className="text-center space-y-2">
+							<p className="text-white/70 font-medium">Conversation Ended</p>
+							<p className="text-white/40 text-sm">The care team has closed this conversation.</p>
+						</div>
+					</div>
+				) : (
+					<ConversationBar
+						agentId={DEFAULT_AGENT_ID}
+						userId={user.id}
+						dynamicVariables={dynamicVariables}
+						overrides={{
+							agent: {
+								firstMessage: greeting_message,
+								prompt: {
+									prompt: final_prompt,
+								},
 							},
-						},
-						widget: {
-							strip_audio_tags: true,
-						},
-						conversation_config: {
-							monitoring: {
-								enabled: true,
+							widget: {
+								strip_audio_tags: true,
 							},
-						},
-					}}
-					onConnect={() => {}}
-					onDisconnect={() => {}}
-					onMessage={(message) => {
-						if (message.message && message.message.trim() !== "") {
+							conversation_config: {
+								monitoring: {
+									enabled: true,
+								},
+							},
+						}}
+						onConnect={(convId?: string) => {
+							if (convId) {
+								setConversationId(convId);
+								conversationIdRef.current = convId;
+							}
+						}}
+						onDisconnect={() => {}}
+						onMessage={(message) => {
+							if (message.message && message.message.trim() !== "") {
+								setMessages((prev) => [
+									...prev,
+									{
+										role:
+											message.source === "user"
+												? "user"
+												: "assistant",
+										content: message.message,
+										time: timeNow(),
+									},
+								]);
+							}
+						}}
+						isTakeover={isTakeover}
+						onSendMessage={async (message) => {
 							setMessages((prev) => [
 								...prev,
-								{
-									role:
-										message.source === "user"
-											? "user"
-											: "assistant",
-									content: message.message,
-									time: timeNow(),
-								},
+								{ role: "user", content: message, time: timeNow() },
 							]);
+
+							if (isTakeoverRef.current && conversationIdRef.current) {
+								try {
+									await fetch("/api/admin/message", {
+										method: "POST",
+										headers: { "Content-Type": "application/json" },
+										body: JSON.stringify({
+											conversation_id: conversationIdRef.current,
+											text: message,
+											sender: "patient",
+										}),
+									});
+								} catch { /* ignore error */ }
+							}
+						}}
+						onError={(error) =>
+							console.error("Conversation error:", error)
 						}
-					}}
-					onSendMessage={(message) =>
-						setMessages((prev) => [
-							...prev,
-							{ role: "user", content: message, time: timeNow() },
-						])
-					}
-					onError={(error) =>
-						console.error("Conversation error:", error)
-					}
-				/>
+						onHandover={async (reason) => {
+							const currentId = conversationIdRef.current;
+							if (!currentId) return;
+							try {
+								await fetch("/api/admin/takeover", {
+									method: "POST",
+									headers: { "Content-Type": "application/json" },
+									body: JSON.stringify({
+										conversation_id: currentId,
+										is_active: true,
+									}),
+								});
+								setIsTakeover(true);
+								isTakeoverRef.current = true;
+								console.log("AI Handover successful! Reason:", reason);
+							} catch (e) {
+								console.error("Failed to trigger takeover via client tool", e);
+							}
+						}}
+					/>
+				)}
 			</div>
 		</div>
 		</div>
