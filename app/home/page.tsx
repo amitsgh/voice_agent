@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
 /* ── Icon helpers ─────────────────────────────────────────────────────────── */
@@ -56,14 +56,52 @@ function ChevronRightIcon() {
 	);
 }
 
+function HistoryIcon() {
+	return (
+		<svg
+			xmlns="http://www.w3.org/2000/svg"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.5"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			className="h-4 w-4"
+		>
+			<path d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+		</svg>
+	);
+}
+
 /* ── Page ─────────────────────────────────────────────────────────────────── */
 export default function HomePage() {
 	const { user, isInitialized, logout } = useAuth();
 	const router = useRouter();
 
+	// History settings — persisted in localStorage so they survive navigation
+	const [historyEnabled, setHistoryEnabled] = useState<boolean>(() => {
+		if (typeof window === "undefined") return true;
+		const saved = localStorage.getItem("nuoro_history_enabled");
+		return saved === null ? true : saved === "true";
+	});
+	const [historyK, setHistoryK] = useState<number>(() => {
+		if (typeof window === "undefined") return 5;
+		const saved = localStorage.getItem("nuoro_history_k");
+		return saved ? Math.max(1, Math.min(20, parseInt(saved, 10))) : 5;
+	});
+
 	useEffect(() => {
 		if (isInitialized && !user) router.replace("/login");
 	}, [isInitialized, user, router]);
+
+	// Persist settings whenever they change
+	useEffect(() => {
+		localStorage.setItem("nuoro_history_enabled", String(historyEnabled));
+	}, [historyEnabled]);
+
+	useEffect(() => {
+		localStorage.setItem("nuoro_history_k", String(historyK));
+	}, [historyK]);
 
 	if (!isInitialized || !user) {
 		return (
@@ -74,6 +112,11 @@ export default function HomePage() {
 	}
 
 	const firstName = user.firstName || "there";
+
+	// Build the chat URL with history params
+	const chatHref = historyEnabled
+		? `/chat?history=1&k=${historyK}`
+		: `/chat?history=0`;
 
 	return (
 		<div className="flex min-h-screen flex-col bg-[#1C2D3B]">
@@ -108,13 +151,104 @@ export default function HomePage() {
 				{/* Cards */}
 				<div className="flex flex-col gap-4">
 					<NavCard
-						href="/chat_v2"
+						href={chatHref}
 						icon={<ChatIcon />}
 						title="Talk to Hannah"
 						subtitle="Your AI-assisted care companion. Book, reschedule, or get support."
 						accentColor="#C46843"
 						badge="AI Assistant"
 					/>
+
+					{/* ── History settings panel ── */}
+					<div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+						<div className="flex items-center justify-between">
+							<div className="flex items-center gap-2.5">
+								<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white/60">
+									<HistoryIcon />
+								</div>
+								<div>
+									<p className="text-white text-sm font-medium leading-tight">
+										Past Conversations
+									</p>
+									<p className="text-white/40 text-xs mt-0.5">
+										{historyEnabled
+											? `Loading last ${historyK} session${historyK === 1 ? "" : "s"}`
+											: "Fresh start each time"}
+									</p>
+								</div>
+							</div>
+
+							{/* Toggle */}
+							<button
+								onClick={() => setHistoryEnabled((v) => !v)}
+								className={[
+									"relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent",
+									"transition-colors duration-200 ease-in-out focus:outline-none",
+									historyEnabled
+										? "bg-[#C46843]"
+										: "bg-white/20",
+								].join(" ")}
+								role="switch"
+								aria-checked={historyEnabled}
+							>
+								<span
+									className={[
+										"pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow",
+										"transition duration-200 ease-in-out",
+										historyEnabled
+											? "translate-x-5"
+											: "translate-x-0",
+									].join(" ")}
+								/>
+							</button>
+						</div>
+
+						{/* k input — only shown when history is enabled */}
+						<div
+							className={[
+								"overflow-hidden transition-all duration-300 ease-out",
+								historyEnabled
+									? "max-h-24 mt-4 opacity-100"
+									: "max-h-0 opacity-0",
+							].join(" ")}
+						>
+							<div className="flex items-center justify-between border-t border-white/10 pt-4">
+								<div>
+									<p className="text-white/70 text-xs font-medium">
+										Sessions to load
+									</p>
+									<p className="text-white/30 text-[11px] mt-0.5">
+										How many past sessions Hannah remembers
+									</p>
+								</div>
+								<div className="flex items-center gap-2">
+									<button
+										onClick={() =>
+											setHistoryK((v) =>
+												Math.max(1, v - 1),
+											)
+										}
+										className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/60 hover:bg-white/20 hover:text-white transition text-sm font-bold"
+									>
+										−
+									</button>
+									<span className="text-white font-semibold text-sm w-5 text-center tabular-nums">
+										{historyK}
+									</span>
+									<button
+										onClick={() =>
+											setHistoryK((v) =>
+												Math.min(20, v + 1),
+											)
+										}
+										className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/60 hover:bg-white/20 hover:text-white transition text-sm font-bold"
+									>
+										+
+									</button>
+								</div>
+							</div>
+						</div>
+					</div>
 
 					<NavCard
 						href="/admin"
@@ -151,11 +285,6 @@ function NavCard({
 	disabled = false,
 }: NavCardProps) {
 	return (
-		/**
-		 * Using a real <a> tag so the browser's native context menu
-		 * "Open link in new tab" works on right-click.
-		 * For left-clicks we let Next.js handle history push via href.
-		 */
 		<a
 			href={disabled ? undefined : href}
 			aria-disabled={disabled}
@@ -171,15 +300,12 @@ function NavCard({
 			}}
 			style={{ "--accent": accentColor } as React.CSSProperties}
 		>
-			{/* Hover glow */}
 			{!disabled && (
 				<div
 					className="pointer-events-none absolute -top-12 -right-12 h-36 w-36 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500 blur-3xl"
 					style={{ background: `${accentColor}1A` }}
 				/>
 			)}
-
-			{/* Icon */}
 			<div
 				className="flex-shrink-0 flex h-14 w-14 items-center justify-center rounded-xl"
 				style={{
@@ -190,8 +316,6 @@ function NavCard({
 			>
 				{icon}
 			</div>
-
-			{/* Text */}
 			<div className="flex-1 min-w-0">
 				<div className="flex flex-wrap items-center gap-2 mb-1">
 					<span className="text-white font-semibold text-base leading-tight">
@@ -210,10 +334,10 @@ function NavCard({
 						</span>
 					)}
 				</div>
-				<p className="text-white/45 text-sm leading-relaxed">{subtitle}</p>
+				<p className="text-white/45 text-sm leading-relaxed">
+					{subtitle}
+				</p>
 			</div>
-
-			{/* Arrow */}
 			{!disabled && (
 				<div className="flex-shrink-0 self-center ml-1 text-white/25 group-hover:text-white/55 group-hover:translate-x-0.5 transition-all duration-200">
 					<ChevronRightIcon />

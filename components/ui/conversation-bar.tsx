@@ -7,6 +7,10 @@ import * as React from "react";
 import { LiveWaveform } from "@/components/ui/live-waveform";
 import { cn } from "@/lib/utils";
 
+// Max number of recent exchanges to inject on mode switch.
+// Keeps the prompt from growing unboundedly on frequent switches.
+const MAX_HISTORY_LINES = 40; // ~20 back-and-forth turns
+
 export interface ConversationBarProps {
 	agentId: string;
 	userId: string;
@@ -57,7 +61,6 @@ export const ConversationBar = React.forwardRef<
 		const [agentState, setAgentState] = React.useState<
 			"disconnected" | "connecting" | "connected" | "disconnecting" | null
 		>("disconnected");
-		const [keyboardOpen, setKeyboardOpen] = React.useState(false);
 		const [textInput, setTextInput] = React.useState("");
 		const [isVoiceMode, setIsVoiceMode] = React.useState(false);
 
@@ -68,6 +71,12 @@ export const ConversationBar = React.forwardRef<
 		// Prevents two concurrent startSession calls (React StrictMode double-fire)
 		const startingRef = React.useRef(false);
 
+		// ── Context continuity across mode switches ──────────────────────────
+		// How many sessions have been started (0 = first ever, >0 = restart)
+		const sessionCountRef = React.useRef(0);
+		// Rolling log of the current in-page conversation, capped at MAX_HISTORY_LINES
+		const conversationHistoryRef = React.useRef<string[]>([]);
+
 		const conversation = useConversation({
 			onConnect: () => {
 				onConnect?.();
@@ -75,11 +84,28 @@ export const ConversationBar = React.forwardRef<
 			onDisconnect: () => {
 				if (!unmountedRef.current) {
 					setAgentState("disconnected");
-					setKeyboardOpen(false);
 				}
 				onDisconnect?.();
 			},
 			onMessage: (message) => {
+				// Accumulate into the rolling history so we can inject it on the
+				// next session start (mode switch or handback after takeover)
+				if (message.message?.trim()) {
+					const speaker =
+						message.source === "user" ? "Patient" : "Hannah";
+					const line = `${speaker}: ${message.message.trim()}`;
+					conversationHistoryRef.current.push(line);
+					// Keep only the most recent lines to avoid prompt bloat
+					if (
+						conversationHistoryRef.current.length >
+						MAX_HISTORY_LINES
+					) {
+						conversationHistoryRef.current =
+							conversationHistoryRef.current.slice(
+								-MAX_HISTORY_LINES,
+							);
+					}
+				}
 				onMessage?.(message);
 			},
 			micMuted: isMuted,
@@ -129,6 +155,51 @@ export const ConversationBar = React.forwardRef<
 			mediaStreamRef.current = null;
 		}, []);
 
+		// ── Build overrides for a session start ─────────────────────────────
+		//
+		// On the FIRST session:  pass overrides as-is (firstMessage + full prompt)
+		// On RESTARTS (mode switch / handback):
+		//   - Suppress firstMessage so Hannah doesn't re-greet
+		//   - Append the rolling conversation history to the prompt so Hannah
+		//     has full context of what was already discussed
+		const buildOverrides = React.useCallback(
+			(voice: boolean) => {
+				const base = (overrides ?? {}) as any;
+				const isRestart = sessionCountRef.current > 0;
+
+				if (!isRestart) {
+					// First session — pass everything unchanged, just add textOnly
+					return {
+						...base,
+						conversation: { textOnly: !voice },
+					};
+				}
+
+				// Restart — suppress greeting and inject history
+				const history = conversationHistoryRef.current;
+				const historyBlock =
+					history.length > 0
+						? `\n\n# Conversation So Far\nYou are already mid-conversation with this patient. Do NOT greet them again or introduce yourself. Continue naturally.\n\n${history.join("\n")}\n\nContinue from here.`
+						: "\n\n# Note\nYou are resuming a conversation. Do NOT greet the patient again or re-introduce yourself. Continue naturally from where you left off.";
+
+				const existingPrompt = base?.agent?.prompt?.prompt ?? "";
+
+				return {
+					...base,
+					agent: {
+						...(base?.agent ?? {}),
+						firstMessage: "", // ← suppress re-greeting
+						prompt: {
+							...(base?.agent?.prompt ?? {}),
+							prompt: existingPrompt + historyBlock,
+						},
+					},
+					conversation: { textOnly: !voice },
+				};
+			},
+			[overrides],
+		);
+
 		// ── Core session start ───────────────────────────────────────────────
 
 		const startConversation = React.useCallback(
@@ -154,10 +225,7 @@ export const ConversationBar = React.forwardRef<
 						userId,
 						connectionType: voice ? "webrtc" : "websocket",
 						dynamicVariables,
-						overrides: {
-							...((overrides as object) ?? {}),
-							conversation: { textOnly: !voice },
-						},
+						overrides: buildOverrides(voice),
 						onStatusChange: (status: {
 							status:
 								| "connected"
@@ -173,9 +241,12 @@ export const ConversationBar = React.forwardRef<
 					// Guard: component may have unmounted while session was establishing
 					if (unmountedRef.current) return;
 
+					// Increment after a successful start so subsequent starts are restarts
+					sessionCountRef.current += 1;
+
 					onConnect?.(conversationId);
 					console.log(
-						`Started ${voice ? "voice" : "text"} session:`,
+						`Started ${voice ? "voice" : "text"} session #${sessionCountRef.current}:`,
 						conversationId,
 					);
 				} catch (error: any) {
@@ -202,14 +273,12 @@ export const ConversationBar = React.forwardRef<
 					startingRef.current = false;
 				}
 			},
-			// conversation object can change identity on every render in some SDK
-			// versions — intentionally omitted to avoid restart loops.
 			// eslint-disable-next-line react-hooks/exhaustive-deps
 			[
 				agentId,
 				userId,
 				dynamicVariables,
-				overrides,
+				buildOverrides,
 				getMicStream,
 				onConnect,
 				onError,
@@ -236,11 +305,6 @@ export const ConversationBar = React.forwardRef<
 		}, [stopMicStream]);
 
 		// ── Auto-start: only fires on the false → true edge of autoStart ────
-		//
-		// The parent passes autoStart={historyLoaded} so the session only starts
-		// after overrides + dynamicVariables are fully built. This also means
-		// StrictMode's unmount/remount cycle won't fire a second startSession
-		// because the edge (false→true) only happens once.
 		const prevAutoStartRef = React.useRef(false);
 		React.useEffect(() => {
 			const wasReady = prevAutoStartRef.current;
@@ -303,26 +367,6 @@ export const ConversationBar = React.forwardRef<
 		const isConnected = agentState === "connected" || isTakeover;
 		const isTransitioning =
 			agentState === "connecting" || agentState === "disconnecting";
-
-		const handleTextChange = React.useCallback(
-			(e: React.ChangeEvent<HTMLTextAreaElement>) => {
-				const value = e.target.value;
-				setTextInput(value);
-				if (value.trim() && isConnected)
-					conversation.sendContextualUpdate(value);
-			},
-			[conversation, isConnected],
-		);
-
-		const handleKeyDown = React.useCallback(
-			(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-				if (e.key === "Enter" && !e.shiftKey) {
-					e.preventDefault();
-					handleSendText();
-				}
-			},
-			[handleSendText],
-		);
 
 		return (
 			<div
@@ -402,7 +446,7 @@ export const ConversationBar = React.forwardRef<
 							smoothingTimeConstant={0.85}
 							height={16}
 							mode="static"
-							className="w-8"
+							className={cn("w-8", waveformClassName)}
 						/>
 						<span className="text-sm font-medium">End</span>
 					</button>
