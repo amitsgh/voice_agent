@@ -4,7 +4,7 @@ const client = new ElevenLabsClient({
 	apiKey: process.env.ELEVENLABS_API_KEY!,
 });
 
-console.log("ELEVENLABS_API_KEY", process.env.ELEVENLABS_API_KEY!);
+// console.log("ELEVENLABS_API_KEY", process.env.ELEVENLABS_API_KEY!);
 
 export async function GET(request: Request) {
 	try {
