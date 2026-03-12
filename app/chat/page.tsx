@@ -45,7 +45,8 @@ async function loadHistory(
 	}
 }
 
-export default function ChatPage() {
+// export default function ChatPage() {
+function ChatPageInner() {
 	const { user, accessToken, isInitialized, logout } = useAuth();
 	const router = useRouter();
 	const searchParams = useSearchParams();
@@ -523,5 +524,21 @@ export default function ChatPage() {
 				</div>
 			</div>
 		</div>
+	);
+}
+
+import { Suspense } from "react";
+
+export default function ChatPage() {
+	return (
+		<Suspense
+			fallback={
+				<div className="flex h-screen items-center justify-center bg-[#1C2D3B]">
+					<div className="w-8 h-8 rounded-full border-2 border-[#C46843]/30 border-t-[#C46843] animate-spin" />
+				</div>
+			}
+		>
+			<ChatPageInner />
+		</Suspense>
 	);
 }
