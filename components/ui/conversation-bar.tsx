@@ -1,22 +1,10 @@
 "use client";
 
 import { useConversation } from "@elevenlabs/react";
-import {
-	ArrowUpIcon,
-	ChevronDown,
-	Keyboard,
-	Mic,
-	MicOff,
-	PhoneIcon,
-	XIcon,
-} from "lucide-react";
+import { ArrowUpIcon, Mic, MicOff, PhoneIcon } from "lucide-react";
 import * as React from "react";
 
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { LiveWaveform } from "@/components/ui/live-waveform";
-import { Separator } from "@/components/ui/separator";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 export interface ConversationBarProps {
@@ -33,6 +21,13 @@ export interface ConversationBarProps {
 	dynamicVariables?: Record<string, string | number | boolean>;
 	overrides?: object;
 	onHandover?: (reason: string) => void;
+	/**
+	 * When true, automatically start a text-only session.
+	 * Pass historyLoaded (or equivalent) here so the session only starts
+	 * once overrides and dynamicVariables are fully stable.
+	 * Default: false
+	 */
+	autoStart?: boolean;
 }
 
 export const ConversationBar = React.forwardRef<
@@ -54,6 +49,7 @@ export const ConversationBar = React.forwardRef<
 			dynamicVariables,
 			overrides,
 			onHandover,
+			autoStart = false,
 		},
 		ref,
 	) => {
@@ -63,24 +59,33 @@ export const ConversationBar = React.forwardRef<
 		>("disconnected");
 		const [keyboardOpen, setKeyboardOpen] = React.useState(false);
 		const [textInput, setTextInput] = React.useState("");
+		const [isVoiceMode, setIsVoiceMode] = React.useState(false);
+
 		const mediaStreamRef = React.useRef<MediaStream | null>(null);
+		const isVoiceModeRef = React.useRef(false);
+		// Flipped to true on unmount — guards all async continuations
+		const unmountedRef = React.useRef(false);
+		// Prevents two concurrent startSession calls (React StrictMode double-fire)
+		const startingRef = React.useRef(false);
 
 		const conversation = useConversation({
 			onConnect: () => {
-				// conversationId is passed in startConversation below
 				onConnect?.();
 			},
 			onDisconnect: () => {
-				setAgentState("disconnected");
+				if (!unmountedRef.current) {
+					setAgentState("disconnected");
+					setKeyboardOpen(false);
+				}
 				onDisconnect?.();
-				setKeyboardOpen(false);
 			},
 			onMessage: (message) => {
 				onMessage?.(message);
 			},
 			micMuted: isMuted,
 			onError: (error: unknown) => {
-				console.error("Error:", error);
+				if (unmountedRef.current) return;
+				console.error("Conversation error:", error);
 				setAgentState("disconnected");
 				const errorObj =
 					error instanceof Error
@@ -100,134 +105,211 @@ export const ConversationBar = React.forwardRef<
 						"AI requested handover! Reason:",
 						parameters.reason,
 					);
-					if (onHandover) {
-						onHandover(
-							parameters.reason ||
-								"Patient requested human agent",
-						);
-					}
-					// Return a success string so the LLM knows the tool fired successfully
+					onHandover?.(
+						parameters.reason || "Patient requested human agent",
+					);
 					return "handover_initiated";
 				},
 			},
 		});
 
+		// ── Mic helpers ──────────────────────────────────────────────────────
+
 		const getMicStream = React.useCallback(async () => {
 			if (mediaStreamRef.current) return mediaStreamRef.current;
-
 			const stream = await navigator.mediaDevices.getUserMedia({
 				audio: true,
 			});
 			mediaStreamRef.current = stream;
-
 			return stream;
 		}, []);
 
-		const startConversation = React.useCallback(async () => {
-			try {
-				setAgentState("connecting");
+		const stopMicStream = React.useCallback(() => {
+			mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+			mediaStreamRef.current = null;
+		}, []);
 
-				await getMicStream();
+		// ── Core session start ───────────────────────────────────────────────
 
-				const conversationId = await conversation.startSession({
-					agentId,
-					userId,
-					connectionType: "webrtc",
-					dynamicVariables,
-					overrides,
-					onStatusChange: (status: {
-						status:
-							| "connected"
-							| "connecting"
-							| "disconnected"
-							| "disconnecting";
-					}) => {
-						setAgentState(status.status);
-					},
-				});
+		const startConversation = React.useCallback(
+			async (voice = false) => {
+				// Block concurrent calls — StrictMode fires effects twice in dev
+				if (startingRef.current) return;
+				startingRef.current = true;
 
-				// startSession resolves once the session is fully established and
-				// returns the conversation ID — safe to use it here.
-				onConnect?.(conversationId);
-				console.log("Started conversation with ID:", conversationId);
-			} catch (error: any) {
-				console.error("Detailed Start Error:", error);
+				try {
+					if (!unmountedRef.current) {
+						setAgentState("connecting");
+						isVoiceModeRef.current = voice;
+						setIsVoiceMode(voice);
+					}
 
-				const errorMessage =
-					error?.message ||
-					error?.reason ||
-					"Failed to start session";
+					if (voice) await getMicStream();
 
-				setAgentState("disconnected");
-				onError?.(new Error(errorMessage));
-			}
-		}, [
-			conversation,
-			getMicStream,
-			agentId,
-			dynamicVariables,
-			overrides,
-			onError,
-			onConnect,
-		]);
+					// Guard: component may have unmounted while awaiting mic permission
+					if (unmountedRef.current) return;
+
+					const conversationId = await conversation.startSession({
+						agentId,
+						userId,
+						connectionType: voice ? "webrtc" : "websocket",
+						dynamicVariables,
+						overrides: {
+							...((overrides as object) ?? {}),
+							conversation: { textOnly: !voice },
+						},
+						onStatusChange: (status: {
+							status:
+								| "connected"
+								| "connecting"
+								| "disconnected"
+								| "disconnecting";
+						}) => {
+							if (!unmountedRef.current)
+								setAgentState(status.status);
+						},
+					});
+
+					// Guard: component may have unmounted while session was establishing
+					if (unmountedRef.current) return;
+
+					onConnect?.(conversationId);
+					console.log(
+						`Started ${voice ? "voice" : "text"} session:`,
+						conversationId,
+					);
+				} catch (error: any) {
+					const msg: string = error?.message ?? error?.reason ?? "";
+
+					// "Session cancelled during connection" is the expected StrictMode
+					// error — swallow it silently and reset state so a retry can proceed
+					const isCancellation =
+						unmountedRef.current ||
+						msg.toLowerCase().includes("cancel") ||
+						msg.toLowerCase().includes("aborted");
+
+					if (!unmountedRef.current) {
+						setAgentState("disconnected");
+						setIsVoiceMode(false);
+						isVoiceModeRef.current = false;
+					}
+
+					if (!isCancellation) {
+						console.error("Start error:", error);
+						onError?.(new Error(msg || "Failed to start session"));
+					}
+				} finally {
+					startingRef.current = false;
+				}
+			},
+			// conversation object can change identity on every render in some SDK
+			// versions — intentionally omitted to avoid restart loops.
+			// eslint-disable-next-line react-hooks/exhaustive-deps
+			[
+				agentId,
+				userId,
+				dynamicVariables,
+				overrides,
+				getMicStream,
+				onConnect,
+				onError,
+			],
+		);
 
 		const handleEndSession = React.useCallback(() => {
 			conversation.endSession();
-			setAgentState("disconnected");
-
-			if (mediaStreamRef.current) {
-				mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-				mediaStreamRef.current = null;
+			if (!unmountedRef.current) {
+				setAgentState("disconnected");
+				setIsVoiceMode(false);
 			}
-		}, [conversation]);
+			isVoiceModeRef.current = false;
+			stopMicStream();
+		}, [conversation, stopMicStream]);
 
+		// ── Unmount cleanup ──────────────────────────────────────────────────
+		React.useEffect(() => {
+			unmountedRef.current = false;
+			return () => {
+				unmountedRef.current = true;
+				stopMicStream();
+			};
+		}, [stopMicStream]);
+
+		// ── Auto-start: only fires on the false → true edge of autoStart ────
+		//
+		// The parent passes autoStart={historyLoaded} so the session only starts
+		// after overrides + dynamicVariables are fully built. This also means
+		// StrictMode's unmount/remount cycle won't fire a second startSession
+		// because the edge (false→true) only happens once.
+		const prevAutoStartRef = React.useRef(false);
+		React.useEffect(() => {
+			const wasReady = prevAutoStartRef.current;
+			prevAutoStartRef.current = autoStart;
+
+			if (!wasReady && autoStart) {
+				startConversation(false);
+			}
+		}, [autoStart, startConversation]);
+
+		// ── Takeover: silence AI while human is active ───────────────────────
 		React.useEffect(() => {
 			if (isTakeover && agentState === "connected") {
 				handleEndSession();
 			}
 		}, [isTakeover, agentState, handleEndSession]);
 
+		// ── Handback: restart text session when takeover ends ────────────────
 		const prevTakeoverRef = React.useRef(isTakeover);
 		React.useEffect(() => {
-			if (prevTakeoverRef.current === true && !isTakeover && agentState === "disconnected") {
-				startConversation();
-			}
+			const wasActive = prevTakeoverRef.current;
 			prevTakeoverRef.current = isTakeover;
+
+			if (wasActive && !isTakeover && agentState === "disconnected") {
+				startConversation(false);
+			}
 		}, [isTakeover, agentState, startConversation]);
 
-		const toggleMute = React.useCallback(() => {
-			setIsMuted((prev) => !prev);
-		}, []);
+		// ── Voice toggle ─────────────────────────────────────────────────────
+		const handleVoiceToggle = React.useCallback(async () => {
+			if (agentState === "connecting" || agentState === "disconnecting")
+				return;
 
-		const handleStartOrEnd = React.useCallback(() => {
-			if (agentState === "connected" || agentState === "connecting") {
+			if (isVoiceMode) {
+				// Downgrade to text
 				handleEndSession();
-			} else if (agentState === "disconnected") {
-				startConversation();
+				await new Promise((r) => setTimeout(r, 400));
+				startConversation(false);
+			} else {
+				// Upgrade to voice
+				if (agentState === "connected") {
+					handleEndSession();
+					await new Promise((r) => setTimeout(r, 400));
+				}
+				startConversation(true);
 			}
-		}, [agentState, handleEndSession, startConversation]);
+		}, [agentState, isVoiceMode, handleEndSession, startConversation]);
 
+		const toggleMute = React.useCallback(() => setIsMuted((p) => !p), []);
+
+		// ── Text send ────────────────────────────────────────────────────────
 		const handleSendText = React.useCallback(() => {
 			if (!textInput.trim()) return;
-
-			const messageToSend = textInput;
-			if (!isTakeover) {
-				conversation.sendUserMessage(messageToSend);
-			}
+			const msg = textInput;
+			if (!isTakeover) conversation.sendUserMessage(msg);
 			setTextInput("");
-			onSendMessage?.(messageToSend);
+			onSendMessage?.(msg);
 		}, [conversation, textInput, onSendMessage, isTakeover]);
 
 		const isConnected = agentState === "connected" || isTakeover;
+		const isTransitioning =
+			agentState === "connecting" || agentState === "disconnecting";
 
 		const handleTextChange = React.useCallback(
 			(e: React.ChangeEvent<HTMLTextAreaElement>) => {
 				const value = e.target.value;
 				setTextInput(value);
-
-				if (value.trim() && isConnected) {
+				if (value.trim() && isConnected)
 					conversation.sendContextualUpdate(value);
-				}
 			},
 			[conversation, isConnected],
 		);
@@ -242,174 +324,112 @@ export const ConversationBar = React.forwardRef<
 			[handleSendText],
 		);
 
-		React.useEffect(() => {
-			return () => {
-				if (mediaStreamRef.current) {
-					mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-				}
-			};
-		}, []);
-
 		return (
 			<div
 				ref={ref}
 				className={cn(
-					"flex w-full items-end justify-center p-4",
+					"flex w-full items-center gap-2 px-4 py-3 bg-[#1C2D3B]",
 					className,
 				)}
 			>
-				<Card className="m-0 w-full gap-0 border p-0 shadow-lg">
-					<div className="flex flex-col-reverse">
-						<div>
-							{keyboardOpen && <Separator />}
-							<div className="flex items-center justify-between gap-2 p-2">
-								<div className="h-8 w-[120px] md:h-10">
-									<div
-										className={cn(
-											"flex h-full items-center gap-2 rounded-md py-1",
-											"bg-foreground/5 text-foreground/70",
-										)}
-									>
-										<div className="h-full flex-1">
-											<div
-												className={cn(
-													"relative flex h-full w-full shrink-0 items-center justify-center overflow-hidden rounded-sm",
-													waveformClassName,
-												)}
-											>
-												<LiveWaveform
-													key={
-														agentState ===
-														"disconnected"
-															? "idle"
-															: "active"
-													}
-													active={
-														isConnected && !isMuted
-													}
-													processing={
-														agentState ===
-														"connecting"
-													}
-													barWidth={3}
-													barGap={1}
-													barRadius={4}
-													fadeEdges={true}
-													fadeWidth={24}
-													sensitivity={1.8}
-													smoothingTimeConstant={0.85}
-													height={20}
-													mode="static"
-													className={cn(
-														"h-full w-full transition-opacity duration-300",
-														agentState ===
-															"disconnected" &&
-															"opacity-0",
-													)}
-												/>
-												{agentState ===
-													"disconnected" && (
-													<div className="absolute inset-0 flex items-center justify-center">
-														<span className="text-foreground/50 text-[10px] font-medium">
-															Customer Support
-														</span>
-													</div>
-												)}
-											</div>
-										</div>
-									</div>
-								</div>
-								<div className="flex items-center">
-									<Button
-										variant="ghost"
-										size="icon"
-										onClick={toggleMute}
-										aria-pressed={isMuted}
-										className={cn(
-											isMuted ? "bg-foreground/5" : "",
-										)}
-										disabled={!isConnected || isTakeover}
-									>
-										{isMuted ? <MicOff /> : <Mic />}
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon"
-										onClick={() =>
-											setKeyboardOpen((v) => !v)
-										}
-										aria-pressed={keyboardOpen}
-										className="relative"
-										disabled={!isConnected}
-									>
-										<Keyboard
-											className={
-												"h-5 w-5 transform-gpu transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] " +
-												(keyboardOpen
-													? "scale-75 opacity-0"
-													: "scale-100 opacity-100")
-											}
-										/>
-										<ChevronDown
-											className={
-												"absolute inset-0 m-auto h-5 w-5 transform-gpu transition-all delay-50 duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] " +
-												(keyboardOpen
-													? "scale-100 opacity-100"
-													: "scale-75 opacity-0")
-											}
-										/>
-									</Button>
-									<Separator
-										orientation="vertical"
-										className="mx-1 -my-2.5"
-									/>
-									<Button
-										variant="ghost"
-										size="icon"
-										onClick={handleStartOrEnd}
-										disabled={
-											agentState === "disconnecting" || isTakeover
-										}
-									>
-										{isConnected ||
-										agentState === "connecting" ? (
-											<XIcon className="h-5 w-5" />
-										) : (
-											<PhoneIcon className="h-5 w-5" />
-										)}
-									</Button>
-								</div>
-							</div>
-						</div>
+				{/* ── Inline text input ── */}
+				<input
+					type="text"
+					value={textInput}
+					onChange={(e) => {
+						const value = e.target.value;
+						setTextInput(value);
+						if (value.trim() && isConnected)
+							conversation.sendContextualUpdate(value);
+					}}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" && !e.shiftKey) {
+							e.preventDefault();
+							handleSendText();
+						}
+					}}
+					placeholder="Type a message…"
+					disabled={!isConnected}
+					className={cn(
+						"flex-1 min-w-0 rounded-full px-4 py-2.5 text-sm outline-none transition",
+						"bg-white/10 text-white placeholder:text-white/30",
+						"border border-white/10 focus:border-white/25 focus:bg-white/15",
+						"disabled:opacity-40",
+					)}
+				/>
 
-						<div
-							className={cn(
-								"overflow-hidden transition-all duration-300 ease-out",
-								keyboardOpen ? "max-h-[120px]" : "max-h-0",
-							)}
-						>
-							<div className="relative px-2 pt-2 pb-2">
-								<Textarea
-									value={textInput}
-									onChange={handleTextChange}
-									onKeyDown={handleKeyDown}
-									placeholder="Enter your message..."
-									className="min-h-[100px] resize-none border-0 pr-12 shadow-none focus-visible:ring-0"
-									disabled={!isConnected}
-								/>
-								<Button
-									size="icon"
-									variant="ghost"
-									onClick={handleSendText}
-									disabled={!textInput.trim() || !isConnected}
-									className="absolute right-3 bottom-3 h-8 w-8"
-								>
-									<ArrowUpIcon className="h-4 w-4" />
-								</Button>
-							</div>
-						</div>
-					</div>
-				</Card>
+				{/* ── Mic / mute button ── */}
+				<button
+					onClick={isVoiceMode ? toggleMute : () => {}}
+					disabled={isTransitioning || isTakeover || !isConnected}
+					className={cn(
+						"flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition",
+						"bg-white/10 text-white/60 hover:bg-white/20 hover:text-white",
+						"disabled:opacity-40",
+						isVoiceMode && isMuted && "bg-white/20 text-white",
+					)}
+				>
+					{isVoiceMode && isMuted ? (
+						<MicOff className="h-5 w-5" />
+					) : (
+						<Mic className="h-5 w-5" />
+					)}
+				</button>
+
+				{/* ── Right action button ── */}
+				{isVoiceMode ? (
+					<button
+						onClick={handleVoiceToggle}
+						disabled={isTransitioning || isTakeover}
+						className={cn(
+							"flex h-10 shrink-0 items-center gap-2 rounded-full px-4 transition",
+							"bg-[#C46843] text-white hover:bg-[#b05a38] disabled:opacity-40",
+						)}
+					>
+						<LiveWaveform
+							key={
+								agentState === "disconnected"
+									? "idle"
+									: "active"
+							}
+							active={isConnected && !isMuted}
+							processing={agentState === "connecting"}
+							barWidth={2}
+							barGap={1}
+							barRadius={4}
+							fadeEdges={false}
+							sensitivity={1.8}
+							smoothingTimeConstant={0.85}
+							height={16}
+							mode="static"
+							className="w-8"
+						/>
+						<span className="text-sm font-medium">End</span>
+					</button>
+				) : textInput.trim() ? (
+					<button
+						onClick={handleSendText}
+						disabled={!isConnected}
+						className={cn(
+							"flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition",
+							"bg-[#C46843] text-white hover:bg-[#b05a38] disabled:opacity-40",
+						)}
+					>
+						<ArrowUpIcon className="h-4 w-4" />
+					</button>
+				) : (
+					<button
+						onClick={handleVoiceToggle}
+						disabled={isTransitioning || isTakeover || !isConnected}
+						title="Start voice call"
+						className={cn(
+							"flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition",
+							"bg-[#C46843] text-white hover:bg-[#b05a38] disabled:opacity-40",
+						)}
+					>
+						<PhoneIcon className="h-4 w-4" />
+					</button>
+				)}
 			</div>
 		);
 	},
