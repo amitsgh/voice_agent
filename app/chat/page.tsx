@@ -2,7 +2,7 @@
 
 import { ArrowLeftIcon, SparklesIcon, UserIcon } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 
 import { ConversationBar } from "@/components/ui/conversation-bar";
 import { cn } from "@/lib/utils";
@@ -28,11 +28,15 @@ async function loadHistory(
 		const res = await fetch(`/api/conversations?user_id=${userId}&k=${k}`);
 		const data = await res.json();
 
-		const messages = (data.messages ?? []).map((entry: any) => ({
-			role: entry.role as "user" | "assistant" | "separator",
-			content: entry.message || entry.text || "",
-			time: timeNow(),
-		}));
+		const messages = (data.messages ?? [])
+			.map((entry: any) => ({
+				role: entry.role as "user" | "assistant" | "separator",
+				content: entry.message || entry.text || "",
+				time: entry.created_at 
+					? new Date(entry.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) 
+					: timeNow(),
+			}))
+			.filter((m: any) => m.content?.trim());
 
 		const summaries = (data.summaries ?? [])
 			.map((s: any) => s.summary)
@@ -45,8 +49,7 @@ async function loadHistory(
 	}
 }
 
-// export default function ChatPage() {
-function ChatPageInner() {
+function ChatContent() {
 	const { user, accessToken, isInitialized, logout } = useAuth();
 	const router = useRouter();
 	const searchParams = useSearchParams();
@@ -98,6 +101,8 @@ function ChatPageInner() {
 		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 	}, [messages]);
 
+	const [handbackMode, setHandbackMode] = useState(false);
+
 	// Poll takeover state every 3s
 	useEffect(() => {
 		if (!conversationId) return;
@@ -107,13 +112,22 @@ function ChatPageInner() {
 					`/api/admin/takeover?conversation_id=${conversationId}`,
 				);
 				const data = await res.json();
+				const nowActive = Boolean(data.is_active);
+				const wasActive = isTakeoverRef.current;
+				
+				// Detect handover transition: Human was active, now AI is back
+				if (wasActive && !nowActive) {
+					console.log("[Chat] Handover detected: Human -> AI");
+					setHandbackMode(true);
+				}
+
 				if (data.resolved) {
 					setIsResolved(true);
 					setIsTakeover(false);
 					isTakeoverRef.current = false;
 				} else {
-					setIsTakeover(Boolean(data.is_active));
-					isTakeoverRef.current = Boolean(data.is_active);
+					setIsTakeover(nowActive);
+					isTakeoverRef.current = nowActive;
 				}
 			} catch {
 				/* ignore */
@@ -140,7 +154,8 @@ function ChatPageInner() {
 				const newMsgs = msgs.filter(
 					(m: any) =>
 						!seenAdminMsgIds.current.has(m.id) &&
-						m.sender !== "patient",
+						m.sender !== "patient" &&
+						m.text?.trim()
 				);
 				if (newMsgs.length > 0) {
 					newMsgs.forEach((m: any) =>
@@ -186,10 +201,9 @@ function ChatPageInner() {
 
 	const lastSummary = summaries[0] ?? null;
 
-	// For reconnects: SHORT neutral opener rendered verbatim by ElevenLabs.
-	// The LLM-generated context-aware follow-up comes from the system prompt
-	// instruction below — Hannah uses it on her first response after the patient replies.
-	const greeting_message = is_reconnect
+	const greeting_message = handbackMode
+		? "The previous agent has handed this conversation to me. I’m the AI assistant and I’ll continue helping you from here. Let me know how I can assist."
+		: is_reconnect
 		? `Hi ${user.firstName}, welcome back!`
 		: `Hi ${user.firstName}, this is Hannah from Nuoro Wellness. How can I help you today? I can help you book, cancel, or reschedule an appointment.`;
 
@@ -202,10 +216,25 @@ function ChatPageInner() {
 		final_prompt += `\n\n# Past Conversation Summaries\nTo provide continuity, here are summaries of your past interactions with this user:\n\n${summaryText}`;
 	}
 
-	// Instruct Hannah to naturally reference the last session when the patient
-	// replies — fires through the LLM so it reads naturally, not as a raw dump.
 	if (is_reconnect && lastSummary) {
 		final_prompt += `\n\n# Reconnect Instruction\nThe patient is returning. You have already greeted them with "Hi ${user.firstName}, welcome back!".\nWhen they reply, naturally acknowledge what happened in their last session in ONE sentence, then ask how you can help — do not re-introduce yourself.\nDo not repeat the summary word-for-word. Keep it warm and concise.\nLast session summary: ${lastSummary}`;
+	}
+
+	if (handbackMode) {
+		// Extract messages from the current human takeover session to provide context
+		const recentTranscript = messages
+			.filter((m) => m.role !== "separator")
+			.slice(-10) 
+			.map((m) => {
+				const sender = (m as any).isHuman ? ((m as any).sender || "Care Team") : (m.role === "user" ? "Patient" : "Assistant");
+				return `${sender}: ${m.content}`;
+			})
+			.join("\n");
+
+		final_prompt += `\n\n# Human Handover Context\nYou are taking over after a human agent ("Care Team") spoke with the patient. 
+Here is the recent transcript for context:\n\n${recentTranscript}\n\n
+Instruction: You have just said: "${greeting_message}". 
+When the patient replies, naturally continue the conversation based on the above context.`;
 	}
 
 	const dynamicVariables: DynamicVariables = {
@@ -224,7 +253,7 @@ function ChatPageInner() {
 	return (
 		<div className="min-h-screen bg-[#1C2D3B]">
 			<div className="flex h-screen max-w-md mx-auto overflow-y-auto flex-col bg-[#1C2D3B]">
-				{/* ── Header ── */}
+				{/* Header */}
 				<div className="flex items-center gap-3 px-4 pt-10 pb-4 border-b border-white/10">
 					<button
 						onClick={() => router.push("/home")}
@@ -269,10 +298,8 @@ function ChatPageInner() {
 					</button>
 				</div>
 
-				{/* ── Messages ── */}
 				<div className="flex-1 overflow-y-auto no-scrollbar px-4 py-4 space-y-4">
 					{!historyLoaded ? (
-						/* Skeleton */
 						<div className="flex flex-col gap-5 animate-pulse pt-2">
 							{[78, 56, 64, 44, 52].map((w, i) => (
 								<div
@@ -302,7 +329,7 @@ function ChatPageInner() {
 								</div>
 							))}
 						</div>
-					) : messages.length === 0 ? (
+					) : messages.filter(msg => msg.role === "separator" || msg.content?.trim()).length === 0 ? (
 						<div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
 							<div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-[#C46843]/40 bg-[#C46843]/10">
 								<SparklesIcon className="h-6 w-6 text-[#C46843]" />
@@ -317,7 +344,7 @@ function ChatPageInner() {
 							</p>
 						</div>
 					) : (
-						messages.map((msg, i) => {
+						messages.filter(msg => msg.role === "separator" || msg.content?.trim()).map((msg, i) => {
 							if (msg.role === "separator") {
 								return (
 									<div
@@ -367,9 +394,7 @@ function ChatPageInner() {
 											<div className="flex items-center gap-2">
 												<span className="text-white/70 text-xs font-medium">
 													{(msg as any).isHuman
-														? ((msg as any)
-																.sender ??
-															"John")
+														? ((msg as any).sender ?? "John")
 														: "Nuoro Care Assistant"}
 												</span>
 												<span
@@ -443,21 +468,39 @@ function ChatPageInner() {
 									setConversationId(convId);
 									conversationIdRef.current = convId;
 								}
+								setHandbackMode(false);
 							}}
 							onDisconnect={() => {}}
 							onMessage={(message) => {
 								if (message.message?.trim()) {
-									setMessages((prev) => [
-										...prev,
-										{
-											role:
-												message.source === "user"
-													? "user"
-													: "assistant",
-											content: message.message,
-											time: timeNow(),
-										},
-									]);
+									const role = message.source === "user" ? "user" : "assistant";
+									setMessages((prev) => {
+										const last = prev[prev.length - 1];
+										const isDup = role === "user" && last?.role === "user" && last?.content === message.message;
+										if (isDup) return prev;
+										
+										// If it's the AI speaking, persist it immediately for the care team
+										if (role === "assistant" && conversationIdRef.current) {
+											fetch("/api/conversations/message", {
+												method: "POST",
+												headers: { "Content-Type": "application/json" },
+												body: JSON.stringify({
+													conversation_id: conversationIdRef.current,
+													role: "ai",
+													message: message.message,
+												}),
+											}).catch(() => {});
+										}
+
+										return [
+											...prev,
+											{
+												role,
+												content: message.message,
+												time: timeNow(),
+											},
+										];
+									});
 								}
 							}}
 							isTakeover={isTakeover}
@@ -470,26 +513,38 @@ function ChatPageInner() {
 										time: timeNow(),
 									},
 								]);
-								if (
-									isTakeoverRef.current &&
-									conversationIdRef.current
-								) {
-									try {
-										await fetch("/api/admin/message", {
-											method: "POST",
-											headers: {
-												"Content-Type":
-													"application/json",
-											},
-											body: JSON.stringify({
-												conversation_id:
-													conversationIdRef.current,
-												text: message,
-												sender: "patient",
-											}),
-										});
-									} catch {
-										/* ignore */
+								
+								if (conversationIdRef.current) {
+									// Persist user message to DB for care team visibility
+									fetch("/api/conversations/message", {
+										method: "POST",
+										headers: { "Content-Type": "application/json" },
+										body: JSON.stringify({
+											conversation_id: conversationIdRef.current,
+											role: "patient",
+											message: message,
+										}),
+									}).catch(() => {});
+									
+									// If in takeover, ALSO post to admin message specifically
+									if (isTakeoverRef.current) {
+										try {
+											await fetch("/api/admin/message", {
+												method: "POST",
+												headers: {
+													"Content-Type":
+														"application/json",
+												},
+												body: JSON.stringify({
+													conversation_id:
+														conversationIdRef.current,
+													text: message,
+													sender: "patient",
+												}),
+											});
+										} catch {
+											/* ignore */
+										}
 									}
 								}
 							}}
@@ -519,6 +574,7 @@ function ChatPageInner() {
 									);
 								}
 							}}
+							handbackMessage={handbackMode ? greeting_message : undefined}
 						/>
 					)}
 				</div>
@@ -526,8 +582,6 @@ function ChatPageInner() {
 		</div>
 	);
 }
-
-import { Suspense } from "react";
 
 export default function ChatPage() {
 	return (
@@ -538,7 +592,8 @@ export default function ChatPage() {
 				</div>
 			}
 		>
-			<ChatPageInner />
+			<ChatContent />
 		</Suspense>
 	);
 }
+

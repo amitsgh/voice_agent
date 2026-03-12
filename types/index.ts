@@ -41,6 +41,8 @@ export interface ChatMessage {
 	role: "user" | "assistant" | "separator";
 	content: string;
 	time: string;
+	isHuman?: boolean;
+	sender?: string;
 }
 
 export interface AuthState {

@@ -32,6 +32,7 @@ export interface ConversationBarProps {
 	 * Default: false
 	 */
 	autoStart?: boolean;
+	handbackMessage?: string;
 }
 
 export const ConversationBar = React.forwardRef<
@@ -54,6 +55,7 @@ export const ConversationBar = React.forwardRef<
 			overrides,
 			onHandover,
 			autoStart = false,
+			handbackMessage,
 		},
 		ref,
 	) => {
@@ -188,7 +190,7 @@ export const ConversationBar = React.forwardRef<
 					...base,
 					agent: {
 						...(base?.agent ?? {}),
-						firstMessage: "", // ← suppress re-greeting
+						firstMessage: handbackMessage ?? "", // ← use handbackMessage if provided, else suppress re-greeting
 						prompt: {
 							...(base?.agent?.prompt ?? {}),
 							prompt: existingPrompt + historyBlock,
@@ -197,7 +199,7 @@ export const ConversationBar = React.forwardRef<
 					conversation: { textOnly: !voice },
 				};
 			},
-			[overrides],
+			[overrides, handbackMessage],
 		);
 
 		// ── Core session start ───────────────────────────────────────────────
