@@ -49,12 +49,20 @@ export async function GET(request: Request) {
 				// 1. ElevenLabs transcript (might be stale/empty for very recent calls)
 				let elMessages: any[] = [];
 				try {
-					const detail = await client.conversationalAi.conversations.get(conv.conversationId);
+					const detail =
+						await client.conversationalAi.conversations.get(
+							conv.conversationId,
+						);
 					elMessages = (detail.transcript ?? [])
 						.filter((m: any) => {
 							const hasText = (m.message || m.text)?.trim();
-							return (m.role === "agent" || m.role === "user" || m.role === "assistant") &&
-								hasText && hasText !== "...";
+							return (
+								(m.role === "agent" ||
+									m.role === "user" ||
+									m.role === "assistant") &&
+								hasText &&
+								hasText !== "..."
+							);
 						})
 						.map((m: any) => ({
 							role: m.role === "agent" ? "assistant" : m.role,
@@ -63,7 +71,9 @@ export async function GET(request: Request) {
 							isHuman: false,
 						}));
 				} catch (err) {
-					console.error(`[history] failed EL fetch for ${conv.conversationId}`);
+					console.error(
+						`[history] failed EL fetch for ${conv.conversationId}`,
+					);
 				}
 
 				// 2. Local DB messages (The ground truth for real-time turns)
@@ -74,27 +84,41 @@ export async function GET(request: Request) {
 						 FROM admin_messages 
 						 WHERE conversation_id = $1 
 						 ORDER BY sent_at ASC`,
-						[conv.conversationId]
+						[conv.conversationId],
 					);
 					dbMessages = dbRes.rows.map((row: any) => {
-						const isHuman = (row.source === 'human' || (row.source === null && row.sender !== 'patient' && row.sender !== 'assistant'));
-						const role = row.sender === 'patient' ? 'user' : 'assistant';
+						const isHuman =
+							row.source === "human" ||
+							(row.source === null &&
+								row.sender !== "patient" &&
+								row.sender !== "assistant");
+						const role =
+							row.sender === "patient" ? "user" : "assistant";
 						return {
 							role,
 							content: row.text,
-							sender: isHuman ? (row.sender ?? "John") : undefined,
+							sender: isHuman
+								? (row.sender ?? "John")
+								: undefined,
 							isHuman,
-							time_in_call_secs: Math.max(0, Math.floor(new Date(row.sent_at).getTime() / 1000) - startTimeSecs),
+							time_in_call_secs: Math.max(
+								0,
+								Math.floor(
+									new Date(row.sent_at).getTime() / 1000,
+								) - startTimeSecs,
+							),
 						};
 					});
 				} catch (err) {
-					console.error(`[history] failed DB fetch for ${conv.conversationId}`);
+					console.error(
+						`[history] failed DB fetch for ${conv.conversationId}`,
+					);
 				}
 
 				// Merge and deduplicate by content (coarse but effective for history)
 				const merged = new Map<string, any>();
-				elMessages.forEach(m => merged.set(m.content.trim(), m));
-				dbMessages.forEach(m => {
+				elMessages.forEach((m) => merged.set(m.content.trim(), m));
+				dbMessages.forEach((m) => {
 					const key = m.content.trim();
 					// If DB has it, it might have better metadata (isHuman) or be the only source for live turns
 					if (!merged.has(key) || m.isHuman) {
@@ -102,8 +126,10 @@ export async function GET(request: Request) {
 					}
 				});
 
-				return Array.from(merged.values()).sort((a, b) => a.time_in_call_secs - b.time_in_call_secs);
-			})
+				return Array.from(merged.values()).sort(
+					(a, b) => a.time_in_call_secs - b.time_in_call_secs,
+				);
+			}),
 		);
 
 		const allMessages: any[] = [];
