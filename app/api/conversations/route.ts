@@ -1,3 +1,4 @@
+import { db } from "@/lib/db";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 
 const client = new ElevenLabsClient({
@@ -40,50 +41,110 @@ export async function GET(request: Request) {
 
 		const conversationsToFetch = conversations.slice(0, k);
 
-		const transcripts = await Promise.all(
-			conversationsToFetch.map((conv) =>
-				client.conversationalAi.conversations
-					.get(conv.conversationId)
-					.then((detail) => detail.transcript ?? [])
-					.catch((err) => {
-						console.error(
-							`[conversations] Failed to fetch conv ${conv.conversationId}:`,
-							err?.message,
+		// Fetch both ElevenLabs transcripts and local DB messages
+		const sessionData = await Promise.all(
+			conversationsToFetch.map(async (conv) => {
+				const startTimeSecs = conv.startTimeUnixSecs;
+
+				// 1. ElevenLabs transcript (might be stale/empty for very recent calls)
+				let elMessages: any[] = [];
+				try {
+					const detail =
+						await client.conversationalAi.conversations.get(
+							conv.conversationId,
 						);
-						return [];
-					}),
-			),
+					elMessages = (detail.transcript ?? [])
+						.filter((m: any) => {
+							const hasText = (m.message || m.text)?.trim();
+							return (
+								(m.role === "agent" ||
+									m.role === "user" ||
+									m.role === "assistant") &&
+								hasText &&
+								hasText !== "..."
+							);
+						})
+						.map((m: any) => ({
+							role: m.role === "agent" ? "assistant" : m.role,
+							content: m.message || m.text,
+							time_in_call_secs: m.timeInCallSecs ?? 0,
+							isHuman: false,
+						}));
+				} catch (err) {
+					console.error(
+						`[history] failed EL fetch for ${conv.conversationId}`,
+					);
+				}
+
+				// 2. Local DB messages (The ground truth for real-time turns)
+				let dbMessages: any[] = [];
+				try {
+					const dbRes = await db.query(
+						`SELECT text, sender, sent_at, source 
+						 FROM admin_messages 
+						 WHERE conversation_id = $1 
+						 ORDER BY sent_at ASC`,
+						[conv.conversationId],
+					);
+					dbMessages = dbRes.rows.map((row: any) => {
+						const isHuman =
+							row.source === "human" ||
+							(row.source === null &&
+								row.sender !== "patient" &&
+								row.sender !== "assistant");
+						const role =
+							row.sender === "patient" ? "user" : "assistant";
+						return {
+							role,
+							content: row.text,
+							sender: isHuman
+								? (row.sender ?? "John")
+								: undefined,
+							isHuman,
+							time_in_call_secs: Math.max(
+								0,
+								Math.floor(
+									new Date(row.sent_at).getTime() / 1000,
+								) - startTimeSecs,
+							),
+						};
+					});
+				} catch (err) {
+					console.error(
+						`[history] failed DB fetch for ${conv.conversationId}`,
+					);
+				}
+
+				// Merge and deduplicate by content (coarse but effective for history)
+				const merged = new Map<string, any>();
+				elMessages.forEach((m) => merged.set(m.content.trim(), m));
+				dbMessages.forEach((m) => {
+					const key = m.content.trim();
+					// If DB has it, it might have better metadata (isHuman) or be the only source for live turns
+					if (!merged.has(key) || m.isHuman) {
+						merged.set(key, m);
+					}
+				});
+
+				return Array.from(merged.values()).sort(
+					(a, b) => a.time_in_call_secs - b.time_in_call_secs,
+				);
+			}),
 		);
 
 		const allMessages: any[] = [];
-		const reversedTranscripts = transcripts.reverse();
+		const reversedSessionData = sessionData.reverse();
 
-		reversedTranscripts.forEach((transcript, index) => {
-			const filtered = transcript
-				.filter((m: any) => {
-					const hasText = (m.message || m.text)?.trim();
-					return (
-						(m.role === "user" ||
-							m.role === "agent" ||
-							m.role === "assistant") &&
-						hasText &&
-						hasText !== "..."
-					);
-				})
-				.map((m: any) => ({
-					role: m.role === "agent" ? "assistant" : m.role,
-					message: m.message || m.text,
-				}));
-
-			const hasUserTurn = filtered.some((m) => m.role === "user");
-			if (filtered.length > 0 && hasUserTurn) {
+		reversedSessionData.forEach((transcript) => {
+			const hasUserTurn = transcript.some((m: any) => m.role === "user");
+			if (transcript.length > 0 && hasUserTurn) {
 				if (allMessages.length > 0) {
 					allMessages.push({
 						role: "separator",
-						message: "Previous Conversation",
+						content: "Previous Conversation",
 					});
 				}
-				allMessages.push(...filtered);
+				allMessages.push(...transcript);
 			}
 		});
 
